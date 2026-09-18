@@ -9,8 +9,8 @@ export type Message =
   | { role: 'tool'; toolCallId: string; content: string };
 
 export interface GenerationResult {
-  text?: string;
-  toolCall?: ToolCall;
+  text?: string | undefined;
+  toolCall?: ToolCall | undefined;
   id: string;
   model: string;
   usage: {
@@ -111,6 +111,7 @@ export function getProvider(): Provider {
             name: tool.name,
             description: tool.description,
             parameters: tool.parameters,
+            strict: false,
           })),
         });
 

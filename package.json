@@ -5,10 +5,14 @@
   "type": "module",
   "description": "An AI agent runtime with tool calling, MCP integration, persistent memory, and task planning.",
   "scripts": {
-    "start": "tsx src/index.ts",
+    "start": "pnpm build && electron .",
+    "cli": "tsx src/index.ts",
     "eval": "tsx src/eval.ts",
-    "test": "node --import tsx --test tests/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "test": "node --import tsx --test tests/*.test.ts src/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "package": "pnpm build && electron-builder --mac dir",
+    "test:desktop": "pnpm build && electron tests/desktop-smoke.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/client": "^2.0.0",
@@ -19,12 +23,28 @@
   },
   "devDependencies": {
     "@types/node": "^26.5.1",
+    "electron": "^44.4.1",
+    "electron-builder": "^26.15.3",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2"
   },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild"
-    ]
+  "main": "desktop/main.mjs",
+  "build": {
+    "appId": "com.xudafeng.agent0",
+    "productName": "agent0",
+    "asar": false,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*.js",
+      "desktop/**",
+      "web/**",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "identity": null
+    }
   }
 }
