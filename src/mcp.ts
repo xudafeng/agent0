@@ -1,5 +1,6 @@
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { fileURLToPath } from 'node:url';
 import type { ToolCall, ToolDefinition } from './tools.js';
 
 export interface McpRuntime {
@@ -28,7 +29,10 @@ export async function connectLocalMcpServer(): Promise<McpRuntime> {
   const client = new Client({ name: 'agent0', version: '0.1.0' });
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: ['--import', 'tsx', 'src/mcp-server.ts'],
+    args: import.meta.url.endsWith('.ts')
+      ? ['--import', 'tsx', fileURLToPath(new URL('./mcp-server.ts', import.meta.url))]
+      : [fileURLToPath(new URL('./mcp-server.js', import.meta.url))],
+    env: { ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined)), ELECTRON_RUN_AS_NODE: '1' },
   });
 
   await client.connect(transport);

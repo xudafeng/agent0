@@ -4,6 +4,9 @@ node_modules
 !.env.example
 .DS_Store
 dist
+release
+.pnpm-store
 data/memory.md
 data/traces.ndjson
 package-lock.json
+pnpm-lock.yaml

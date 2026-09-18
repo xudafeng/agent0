@@ -31,9 +31,15 @@ Replace `your-model-id` with a model ID available to your account. Both the Kimi
 
 ```bash
 pnpm install
-pnpm start
+pnpm cli
 ```
 
 Enter messages in the interactive terminal after startup. Type `exit` to quit.
 
 Keep local settings in `.env` and do not commit it to Git. Include only example values in `.env.example`.
+
+## Desktop settings
+
+Run `pnpm start` to open the desktop app. Model settings can be edited in the app without editing files. Saving settings starts a new conversation and preserves saved memory.
+
+The packaged app uses its own `.env` in the application support directory; it does not copy project credentials. For an isolated development profile, set `AGENT0_PROFILE_DIR` to an absolute directory path.

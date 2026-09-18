@@ -104,7 +104,9 @@ export function createTaskRuntime(): TaskRuntime {
           throw new Error(`Step index out of range: ${index}`);
         }
 
-        state.steps[index] = { ...state.steps[index], status };
+        const step = state.steps[index];
+        if (!step) throw new Error(`Step index out of range: ${index}`);
+        state.steps[index] = { ...step, status };
         return state;
       }
 

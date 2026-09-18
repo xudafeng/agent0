@@ -25,7 +25,7 @@ export interface TraceRecorder {
   record(type: TraceEventType, data?: Record<string, unknown>, step?: number): Promise<void>;
 }
 
-export async function createTraceRecorder(): Promise<TraceRecorder> {
+export async function createTraceRecorder(onEvent?: (event: TraceEvent) => void): Promise<TraceRecorder> {
   await mkdir(dirname(TRACE_PATH), { recursive: true });
   const runId = randomUUID();
 
@@ -35,11 +35,12 @@ export async function createTraceRecorder(): Promise<TraceRecorder> {
       const event: TraceEvent = {
         runId,
         timestamp: new Date().toISOString(),
-        step,
+        ...(step === undefined ? {} : { step }),
         type,
-        data,
+        ...(data === undefined ? {} : { data }),
       };
       await appendFile(TRACE_PATH, `${JSON.stringify(event)}\n`, 'utf-8');
+      onEvent?.(event);
     },
   };
 }

@@ -1,0 +1,154 @@
+import { app, BrowserWindow, ipcMain, Menu } from 'electron';
+import { fileURLToPath } from 'node:url';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import dotenv from 'dotenv';
+import { createAgentRuntime } from '../dist/runtime.js';
+import { loadMemory } from '../dist/memory.js';
+
+const root = fileURLToPath(new URL('..', import.meta.url));
+let window;
+let runtime;
+let busy = false;
+let history = [];
+let events = [];
+let configPath;
+let savedMemory = '';
+
+function configuration() {
+  const provider = process.env.LLM_PROVIDER || 'kimi';
+  const kimi = provider !== 'openai';
+  return {
+    provider,
+    model: process.env[kimi ? 'MOONSHOT_MODEL' : 'OPENAI_MODEL'] || '',
+    baseURL: kimi ? process.env.MOONSHOT_BASE_URL || 'https://api.moonshot.cn/v1' : '',
+    configured: Boolean(process.env[kimi ? 'MOONSHOT_API_KEY' : 'OPENAI_API_KEY']),
+  };
+}
+
+function state() {
+  return { history, events, busy, config: configuration(), memory: runtime?.getMemory() || savedMemory, task: runtime?.getTaskState() || null };
+}
+
+function publish(type, data) {
+  if (window && !window.isDestroyed()) window.webContents.send('agent:event', { type, data });
+}
+
+async function getRuntime() {
+  runtime ||= await createAgentRuntime();
+  return runtime;
+}
+
+function text(value, name, limit = 32000) {
+  if (typeof value !== 'string' || !value.trim() || value.length > limit) throw new Error(`Invalid ${name}.`);
+  return value.trim();
+}
+
+function handle(name, action) {
+  ipcMain.handle(`agent:${name}`, async (event, payload) => {
+    if (event.sender !== window?.webContents || event.senderFrame !== window.webContents.mainFrame) throw new Error('Unknown sender.');
+    if (name === 'state') return action(payload);
+    if (busy) throw new Error('Wait for the current operation to finish.');
+    busy = true;
+    publish('state', state());
+    try {
+      return await action(payload);
+    } finally {
+      busy = false;
+      publish('state', state());
+    }
+  });
+}
+
+handle('state', state);
+handle('send', async (prompt) => {
+  const value = text(prompt, 'message');
+  const agent = await getRuntime();
+  history.push({ role: 'user', content: value });
+  events = [];
+  publish('state', state());
+  try {
+    const result = await agent.run(value, (event) => {
+      events.push(event);
+      publish('trace', event);
+      publish('state', state());
+    });
+    history.push({ role: 'assistant', content: result.text, steps: result.steps });
+  } catch (error) {
+    history.push({ role: 'error', content: error instanceof Error ? error.message : String(error) });
+    throw error;
+  }
+});
+handle('reset', async () => {
+  await runtime?.close();
+  runtime = undefined;
+  history = [];
+  events = [];
+});
+handle('remember', async (content) => {
+  await (await getRuntime()).remember(text(content, 'memory', 4000));
+  savedMemory = runtime.getMemory();
+});
+handle('configure', async (input) => {
+  if (!input || !['openai', 'kimi'].includes(input.provider)) throw new Error('Choose a provider.');
+  const model = text(input.model, 'model', 200);
+  const prefix = input.provider === 'kimi' ? 'MOONSHOT' : 'OPENAI';
+  const apiKey = input.apiKey ? text(input.apiKey, 'API key', 2000) : process.env[`${prefix}_API_KEY`];
+  if (!apiKey) throw new Error('Enter an API key.');
+  const values = { LLM_PROVIDER: input.provider, [`${prefix}_MODEL`]: model, [`${prefix}_API_KEY`]: apiKey };
+  if (input.provider === 'kimi') {
+    const url = new URL(text(input.baseURL, 'base URL', 2000));
+    if (!['https:', 'http:'].includes(url.protocol)) throw new Error('Use an HTTP or HTTPS base URL.');
+    values.MOONSHOT_BASE_URL = url.toString().replace(/\/$/, '');
+  }
+  if (Object.values(values).some((value) => /[\r\n"\\]/.test(value))) throw new Error('Configuration contains unsupported characters.');
+  let existing = '';
+  try { existing = await readFile(configPath, 'utf8'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  const preserved = existing.split('\n').filter((line) => {
+    const match = line.match(/^\s*(?:export\s+)?([A-Z_][A-Z_0-9]*)\s*=/);
+    return !match || !(match[1] in values);
+  }).join('\n').trimEnd();
+  await writeFile(configPath, `${preserved}\n${Object.entries(values).map(([key, value]) => `${key}="${value}"`).join('\n')}\n`, { mode: 0o600 });
+  Object.assign(process.env, values);
+  await runtime?.close();
+  runtime = undefined;
+  history = [];
+  events = [];
+});
+
+app.whenReady().then(async () => {
+  const dataDirectory = app.isPackaged ? app.getPath('userData') : process.env.AGENT0_PROFILE_DIR || root;
+  await mkdir(dataDirectory, { recursive: true });
+  process.chdir(dataDirectory);
+  configPath = path.join(dataDirectory, '.env');
+  dotenv.config({ path: configPath, override: true, quiet: true });
+  savedMemory = await loadMemory();
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    { role: 'appMenu' }, { role: 'editMenu' }, { role: 'viewMenu' }, { role: 'windowMenu' },
+  ]));
+
+  function createWindow() {
+    window = new BrowserWindow({
+      width: 1320, height: 860, minWidth: 860, minHeight: 620,
+      title: 'agent0', backgroundColor: '#f6f7f9', titleBarStyle: 'hiddenInset',
+      webPreferences: { preload: path.join(root, 'desktop/preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
+    });
+    window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    window.webContents.on('will-navigate', (event) => event.preventDefault());
+    window.loadFile(path.join(root, 'web/index.html'));
+  }
+  createWindow();
+  app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+  app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+  let quitting = false;
+  app.on('before-quit', (event) => {
+    if (quitting) return;
+    event.preventDefault();
+    quitting = true;
+    void Promise.race([runtime?.close(), new Promise((resolve) => setTimeout(resolve, 2000))]).finally(() => app.quit());
+  });
+
+}).catch((error) => {
+  console.error(error);
+  app.exit(1);
+});

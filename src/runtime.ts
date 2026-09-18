@@ -4,7 +4,7 @@ import { connectLocalMcpServer } from './mcp.js';
 import { getProvider, type Message } from './provider.js';
 import { createSubagentRuntime } from './subagent.js';
 import { createTaskRuntime, formatTaskState, type TaskState } from './task.js';
-import { createTraceRecorder } from './trace.js';
+import { createTraceRecorder, type TraceEvent } from './trace.js';
 import { executeTool, tools as localTools } from './tools.js';
 
 export interface RuntimeOptions {
@@ -18,7 +18,7 @@ export interface RunResult {
 }
 
 export interface AgentRuntime {
-  run(prompt: string): Promise<RunResult>;
+  run(prompt: string, onEvent?: (event: TraceEvent) => void): Promise<RunResult>;
   remember(content: string): Promise<void>;
   getMemory(): string;
   getTaskState(): TaskState | undefined;
@@ -36,13 +36,13 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
   let memory = await loadMemory();
 
   return {
-    async run(prompt) {
+    async run(prompt, onEvent) {
       const value = prompt.trim();
       if (!value) {
         throw new Error('Prompt cannot be empty.');
       }
 
-      const trace = await createTraceRecorder();
+      const trace = await createTraceRecorder(onEvent);
       await trace.record('run_start', { prompt: value });
       messages.push({ role: 'user', content: value });
 
