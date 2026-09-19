@@ -9,3 +9,4 @@ release
 data/memory.md
 data/traces.ndjson
 package-lock.json
+pnpm-lock.yaml

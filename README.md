@@ -38,7 +38,7 @@ The application icon lives in `desktop/assets`. After editing `icon.svg`, run `p
 
 ## GitHub Actions builds
 
-The **Build Electron app** workflow runs on branch pushes, `v*` tags, pull requests, and manual dispatch. It installs the pinned pnpm version with the committed lockfile, runs typechecking and unit tests, and packages these downloads:
+The **Build Electron app** workflow runs on branch pushes, `v*` tags, pull requests, and manual dispatch. It uses the pinned pnpm version and resolves dependencies from `package.json` with `pnpm install --no-frozen-lockfile`, then runs typechecking and unit tests and packages these downloads. Lockfiles are ignored, so resolved dependency versions can change between builds:
 
 | Platform | Architecture | Download |
 | --- | --- | --- |
