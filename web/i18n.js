@@ -1,4 +1,9 @@
 const chinese = {
+  'SMART TOOL ROUTING': '智能工具路由',
+  'Jev selects the tool. Your model takes it from there.': 'Jev 选择工具，主模型接力完成。',
+  'Confidence-aware decisions, with your main model ready to take over.': '根据置信度做出选择，不确定时由主模型接手。',
+  'Set up Jev': '配置 Jev',
+  'Manage Jev': '管理 Jev',
   'Jev routing': 'Jev 智能路由',
   'Enable Jev routing': '启用 Jev 智能路由',
   'TypeSafe API key': 'TypeSafe API 密钥',

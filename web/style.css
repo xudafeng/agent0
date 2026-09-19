@@ -256,7 +256,7 @@ header {
 
 .welcome {
   max-width: 650px;
-  margin: clamp(24px, 9vh, 100px) auto 24px;
+  margin: clamp(12px, 3vh, 32px) auto 24px;
   text-align: center;
 }
 
@@ -303,7 +303,66 @@ h1 {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 10px;
-  margin-top: 38px;
+  margin-top: 20px;
+}
+
+.jev-feature {
+  margin-top: 24px;
+  padding: 20px 22px;
+  border: 1px solid #cee0d5;
+  border-radius: 12px;
+  background: linear-gradient(120deg, #edf5ef, #f8fbf9);
+  text-align: left;
+}
+
+.jev-feature-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.jev-feature-badge {
+  border-radius: 7px;
+  padding: 5px 12px;
+  background: #2c5744;
+  color: white;
+  font-size: 17px;
+  font-weight: 650;
+}
+
+.jev-feature-kicker {
+  color: #476553;
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 1.4px;
+}
+
+.jev-feature strong {
+  color: #294c3b;
+  font-size: 16px;
+  font-weight: 550;
+}
+
+.jev-feature p {
+  color: #607468;
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.jev-feature button {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 0;
+  margin-top: 9px;
+  color: #2c5744;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.jev-feature button:hover {
+  text-decoration: underline;
 }
 
 .suggestions button {

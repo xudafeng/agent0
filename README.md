@@ -1,8 +1,14 @@
 # agent0
 
-A desktop AI agent with conversations, live tool activity, task planning, MCP integration, and persistent memory.
+**English** | [简体中文](README.zh-CN.md)
 
-![agent0 desktop app showing the conversation view and agent workspace](docs/images/agent0-desktop.png)
+A desktop AI agent with **Jev-powered tool routing**, MCP integration, task planning, and persistent memory.
+
+**Jev selects the tool. Your model handles the reasoning.** Enable optional TypeSafe Jev routing to select relevant tools with confidence-based fallback to your main model. Follow each decision, confidence score, and latency in the Activity panel.
+
+[Set up Jev](docs/configuration.md#jev-routing) · [Download desktop builds](https://github.com/xudafeng/agent0/actions/workflows/build-electron.yml)
+
+![agent0 desktop app featuring Jev tool routing, its setup shortcut, and the agent workspace](docs/images/agent0-desktop.png)
 
 ## Download the desktop app
 
