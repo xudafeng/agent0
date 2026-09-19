@@ -11,6 +11,7 @@
     "test": "node --import tsx --test tests/*.test.ts src/*.test.ts",
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.build.json",
+    "build:icons": "electron scripts/build-icons.mjs",
     "package": "pnpm build && electron-builder --mac dir",
     "test:desktop": "pnpm build && electron tests/desktop-smoke.mjs"
   },
@@ -43,6 +44,7 @@
       "package.json"
     ],
     "mac": {
+      "icon": "desktop/assets/icon.icns",
       "category": "public.app-category.productivity",
       "identity": null
     }
