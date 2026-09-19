@@ -1,4 +1,5 @@
 import { applyLanguage, setLanguage, t } from './i18n.js';
+import { setupMcpSettings } from './mcp-settings.js';
 
 const $ = (id) => document.getElementById(id);
 const api = window.agent0;
@@ -9,6 +10,7 @@ let progressEvent;
 let keepSavedKey = false;
 
 applyLanguage();
+const mcpSettings = setupMcpSettings();
 
 function element(tag, className, value) {
   const node = document.createElement(tag);
@@ -28,6 +30,7 @@ function render(state) {
   current = state;
   const { config, history, busy, task, memory, events } = state;
   const locked = busy || sending;
+  mcpSettings.setBusy(locked);
   $('connection-label').textContent = busy ? t('Working') : config.configured ? t('Ready') : t('Setup needed');
   $('model-label').textContent = config.model || t('Connect a model to get started');
   $('send').disabled = locked || !$('prompt').value.trim();
