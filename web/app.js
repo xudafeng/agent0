@@ -1,5 +1,6 @@
 import { applyLanguage, setLanguage, t } from './i18n.js';
 import { setupMcpSettings } from './mcp-settings.js';
+import { setupJevSettings, jevActivityLabel } from './jev-settings.js';
 
 const $ = (id) => document.getElementById(id);
 const api = window.agent0;
@@ -11,6 +12,7 @@ let keepSavedKey = false;
 
 applyLanguage();
 const mcpSettings = setupMcpSettings();
+const jevSettings = setupJevSettings();
 
 function element(tag, className, value) {
   const node = document.createElement(tag);
@@ -31,6 +33,7 @@ function render(state) {
   const { config, history, busy, task, memory, events } = state;
   const locked = busy || sending;
   mcpSettings.setBusy(locked);
+  jevSettings.render(config.jev, locked);
   $('connection-label').textContent = busy ? t('Working') : config.configured ? t('Ready') : t('Setup needed');
   $('model-label').textContent = config.model || t('Connect a model to get started');
   $('send').disabled = locked || !$('prompt').value.trim();
@@ -68,14 +71,14 @@ function render(state) {
   const memoryContent = memory.replace(/^# Memory\s*/, '').trim();
   $('memory').textContent = memoryContent || t('Save useful context for future conversations.');
   $('memory').classList.toggle('empty-panel', !memoryContent);
-  const activity = events.filter((event) => ['tool_call', 'tool_result', 'run_error', 'final_answer'].includes(event.type));
+  const activity = events.filter((event) => ['jev_decision', 'tool_call', 'tool_result', 'run_error', 'final_answer'].includes(event.type));
   $('activity-count').textContent = activity.length;
   // Avoid rebuilding activity details when only unrelated state changes.
   if ($('activity').dataset.snapshot !== JSON.stringify(activity)) {
     $('activity').dataset.snapshot = JSON.stringify(activity);
     $('activity').replaceChildren(...activity.map((event) => {
       const details = element('details', '');
-      const label = event.type === 'tool_call' ? `↗ ${event.data.name}` : event.type === 'tool_result' ? `✓ ${t('{name} returned', { name: event.data.name })}` : event.type === 'run_error' ? t('Run failed') : t('Response ready');
+      const label = event.type === 'jev_decision' ? jevActivityLabel(event.data) : event.type === 'tool_call' ? `↗ ${event.data.name}` : event.type === 'tool_result' ? `✓ ${t('{name} returned', { name: event.data.name })}` : event.type === 'run_error' ? t('Run failed') : t('Response ready');
       details.append(element('summary', '', label), element('pre', '', JSON.stringify(event.data, null, 2)));
       return details;
     }));

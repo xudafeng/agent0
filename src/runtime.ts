@@ -1,4 +1,5 @@
 import { buildContext } from './context.js';
+import { createJevRouter } from './jev.js';
 import { loadMemory, remember as persistMemory } from './memory.js';
 import { connectMcpServers } from './mcp.js';
 import { getProvider, type Message } from './provider.js';
@@ -28,6 +29,7 @@ export interface AgentRuntime {
 export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<AgentRuntime> {
   const maxSteps = options.maxSteps ?? 8;
   const provider = getProvider();
+  const route = createJevRouter();
   const messages: Message[] = [];
   const mcp = await connectMcpServers();
   const taskRuntime = createTaskRuntime();
@@ -49,7 +51,10 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
       try {
         for (let step = 1; step <= maxSteps; step += 1) {
           const context = buildContext(memory, messages, taskRuntime.getState());
-          const result = await provider.generate(context, tools);
+          const routed = await route?.(context, tools);
+          if (routed) await trace.record('jev_decision', { ...routed.decision }, step);
+          const availableTools = routed?.tools ?? tools;
+          const result = await provider.generate(context, availableTools);
           const { text, toolCall, ...metadata } = result;
 
           await trace.record(
@@ -69,6 +74,7 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
 
             let toolContent: string;
             try {
+              if (!availableTools.some((tool) => tool.name === toolCall.name)) throw new Error('Tool is not available for this step.');
               const toolResult = taskRuntime.hasTool(toolCall.name)
                 ? taskRuntime.callTool(toolCall)
                 : subagentRuntime.hasTool(toolCall.name)

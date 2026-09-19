@@ -20,6 +20,7 @@ The app opens a native desktop window. Choose **Model settings**, select Kimi or
 - Switch between English and Simplified Chinese using Language in the sidebar or model settings. The interface initially follows your system language and remembers your choice locally. Conversation content stays in its original language.
 - Open **MCP servers** in the sidebar to add local stdio or remote HTTP/SSE servers, test connections, inspect tools, and enable or disable integrations. See [MCP configuration](docs/configuration.md#mcp-servers) for setup details.
 - Choose **Built-in Filesystem**, select a folder, and save to let the agent read, write, and organize files within that folder. The server is bundled with the app; no separate Node.js installation is required.
+- Open **Jev routing** to enable TypeSafe's decision model with your own TypeSafe API key. Jev selects a relevant tool before each main-model step; Activity shows the decision, confidence, and latency. See [Jev configuration](docs/configuration.md#jev-routing).
 
 Model responses appear when each agent run finishes; tool activity updates during the run. The current conversation survives a window reload and stays in memory until you start a new conversation or quit. Saved memory and model settings persist after quitting.
 
