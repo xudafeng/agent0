@@ -2,6 +2,7 @@
   "name": "agent0",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@11.9.0",
   "type": "module",
   "description": "An AI agent runtime with tool calling, MCP integration, persistent memory, and task planning.",
   "scripts": {
@@ -35,6 +36,7 @@
     "appId": "com.xudafeng.agent0",
     "productName": "agent0",
     "asar": false,
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "directories": {
       "output": "release"
     },
@@ -44,6 +46,14 @@
       "web/**",
       "package.json"
     ],
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "desktop/assets/icon.png",
+      "category": "Utility"
+    },
     "mac": {
       "icon": "desktop/assets/icon.icns",
       "category": "public.app-category.productivity",
