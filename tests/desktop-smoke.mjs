@@ -17,11 +17,36 @@ app.setPath('userData', profile);
 process.env.AGENT0_PROFILE_DIR = profile;
 const remoteFixture = await startRemoteMcp();
 let calls = 0;
+let jevCalls = 0;
+let routingRun = false;
 const server = createServer(async (request, response) => {
   let body = '';
   for await (const chunk of request) body += chunk;
   const input = JSON.parse(body);
+  if (request.url === '/jev') {
+    jevCalls += 1;
+    assert.equal(request.headers.authorization, 'Bearer jev-secret');
+    const criteria = input.questions.route.criteria;
+    const selected = jevCalls === 1 ? Object.keys(criteria).find((key) => criteria[key].startsWith('add:')) : 'defer';
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ model: 'jev-test', answers: { route: { type: 'choice', choice: selected, confidence: 0.95,
+      probabilities: Object.fromEntries(Object.keys(criteria).map((key) => [key, key === selected ? 1 : 0])) } } }));
+    return;
+  }
   assert.ok(input.messages.length > 0);
+  if (routingRun) {
+    if (jevCalls === 1) assert.deepEqual(input.tools.map((tool) => tool.function.name), ['add']);
+    else {
+      assert.ok(input.tools.length > 1);
+      assert.ok(input.messages.some((message) => message.role === 'tool' && message.content.includes('"result":5')));
+    }
+    const message = jevCalls === 1
+      ? { content: null, tool_calls: [{ id: 'jev-add', type: 'function', function: { name: 'add', arguments: '{"a":2,"b":3}' } }] }
+      : { content: 'Jev routing works: 5.' };
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ id: 'jev-test', model: 'test-model', choices: [{ message, finish_reason: 'stop' }] }));
+    return;
+  }
   const mcpTool = input.tools.find((tool) => tool.function.name.startsWith('mcp_smoke__greet_'));
   const filesystemTool = input.tools.find((tool) => tool.function.name.startsWith('mcp_builtin-filesystem__read_text_file_'));
   const remoteTool = input.tools.find((tool) => tool.function.name.startsWith('mcp_remote__echo_'));
@@ -48,6 +73,10 @@ await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 await writeFile(join(profile, '.env'), 'LLM_PROVIDER=kimi\nCUSTOM_SETTING=preserved\n');
 delete process.env.MOONSHOT_API_KEY;
 delete process.env.OPENAI_API_KEY;
+delete process.env.TYPESAFE_API_KEY;
+process.env.JEV_ENABLED = 'false';
+process.env.JEV_ENDPOINT = `http://127.0.0.1:${server.address().port}/jev`;
+process.env.JEV_TIMEOUT_MS = '3000';
 const deadline = setTimeout(() => { console.error('Desktop smoke test timed out'); app.exit(1); }, 30000);
 async function run() {
 try {
@@ -256,8 +285,39 @@ try {
   await waitFor('!document.querySelector(\'.mcp-server\') && !document.getElementById(\'mcp-save\').disabled');
   assert.equal((await evaluate('window.agent0.mcpList()')).length, 0);
   await evaluate('document.getElementById(\'close-mcp\').click()');
+  await evaluate('document.getElementById(\'jev-button\').click()');
+  await evaluate('document.getElementById(\'jev-enabled\').checked = true; document.getElementById(\'jev-form\').requestSubmit()');
+  await waitFor('!document.getElementById(\'jev-error\').hidden');
+  assert.equal((await evaluate('window.agent0.state()')).config.jev.enabled, false);
+  await evaluate('document.getElementById(\'jev-key\').value = \'jev-secret\'; document.getElementById(\'jev-form\').requestSubmit()');
+  await waitFor('!document.getElementById(\'jev-settings\').open');
+  assert.equal((await evaluate('window.agent0.state()')).config.jev.enabled, true);
+  assert.ok(!JSON.stringify(await evaluate('window.agent0.state()')).includes('jev-secret'));
+  assert.equal(dotenv.parse(await readFile(join(profile, '.env'))).TYPESAFE_API_KEY, 'jev-secret');
+  assert.equal(dotenv.parse(await readFile(join(profile, '.env'))).MOONSHOT_API_KEY, 'test-key');
+  await evaluate('document.getElementById(\'jev-button\').click()');
+  assert.equal(await evaluate('document.getElementById(\'jev-key\').value'), '');
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  await writeFile(join(profile, 'jev-settings.png'), (await window.webContents.capturePage()).toPNG());
+  await evaluate('document.getElementById(\'jev-form\').requestSubmit()');
+  await waitFor('!document.getElementById(\'jev-settings\').open');
+  assert.equal(dotenv.parse(await readFile(join(profile, '.env'))).TYPESAFE_API_KEY, 'jev-secret');
+  routingRun = true;
+  await evaluate('document.getElementById(\'prompt\').value = \'Add 2 and 3\'; document.getElementById(\'chat-form\').requestSubmit()');
+  await waitFor('document.getElementById(\'conversation\').textContent.includes(\'Jev routing works: 5.\')');
+  assert.equal(jevCalls, 2);
+  assert.equal((await evaluate('window.agent0.state()')).events.filter((event) => event.type === 'jev_decision').length, 2);
+  await switchLanguage('en');
+  assert.ok(await evaluate('document.getElementById(\'activity\').textContent.includes(\'Jev selected add\')'));
+  assert.ok(await evaluate('document.getElementById(\'activity\').textContent.includes(\'Jev deferred to main model\')'));
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  await writeFile(join(profile, 'jev-activity.png'), (await window.webContents.capturePage()).toPNG());
+  assert.ok(!(await readFile(join(profile, 'data/traces.ndjson'), 'utf8')).includes('jev-secret'));
+  await evaluate('document.getElementById(\'jev-button\').click(); document.getElementById(\'jev-enabled\').checked = false; document.getElementById(\'jev-form\').requestSubmit()');
+  await waitFor('!document.getElementById(\'jev-settings\').open');
+  assert.equal((await evaluate('window.agent0.state()')).config.jev.enabled, false);
   assert.equal(errors.length, 0, errors.join('\n'));
-  console.log(`PASS: setup, chat, MCP settings, external tool calls, task plan, memory, language switching, persistence, reload, reset. Screenshots: ${profile}`);
+  console.log(`PASS: setup, chat, MCP settings, external tool calls, task plan, memory, language switching, persistence, reload, reset, Jev settings and routing. Screenshots: ${profile}`);
   clearTimeout(deadline);
   server.close();
   await remoteFixture.close();

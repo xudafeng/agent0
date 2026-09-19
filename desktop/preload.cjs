@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('agent0', {
   reset: () => ipcRenderer.invoke('agent:reset'),
   remember: (content) => ipcRenderer.invoke('agent:remember', content),
   configure: (config) => ipcRenderer.invoke('agent:configure', config),
+  jevSave: (config) => ipcRenderer.invoke('agent:jev-save', config),
   mcpList: () => ipcRenderer.invoke('agent:mcp-list'),
   mcpPickDirectory: () => ipcRenderer.invoke('agent:mcp-pick-directory'),
   mcpCheck: (id) => ipcRenderer.invoke('agent:mcp-check', id),

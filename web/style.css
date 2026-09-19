@@ -737,7 +737,8 @@ dialog select {
   font-size: 12px;
 }
 
-#save-settings {
+#save-settings,
+#jev-save {
   width: 100%;
   margin-top: 24px;
 }
@@ -896,13 +897,15 @@ dialog select {
   font-size: 12px;
 }
 
-#mcp-form .mcp-enabled {
+#mcp-form .mcp-enabled,
+#jev-form .mcp-enabled {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-#mcp-enabled {
+#mcp-enabled,
+#jev-enabled {
   width: auto;
   margin: 0;
 }

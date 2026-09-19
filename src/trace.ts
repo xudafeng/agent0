@@ -7,6 +7,7 @@ const TRACE_PATH = 'data/traces.ndjson';
 export type TraceEventType =
   | 'run_start'
   | 'model_result'
+  | 'jev_decision'
   | 'tool_call'
   | 'tool_result'
   | 'final_answer'

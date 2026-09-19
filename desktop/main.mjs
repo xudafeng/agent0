@@ -5,6 +5,7 @@ import path from 'node:path';
 import dotenv from 'dotenv';
 import { createAgentRuntime } from '../dist/runtime.js';
 import { loadMemory } from '../dist/memory.js';
+import { jevConfiguration } from '../dist/jev.js';
 import { checkMcpServers, connectMcpServer } from '../dist/mcp.js';
 import { encodeMcpServers, loadMcpServers, mcpConfigKey, validateMcpServers } from '../dist/mcp-config.js';
 
@@ -26,6 +27,7 @@ function configuration() {
     model: process.env[kimi ? 'MOONSHOT_MODEL' : 'OPENAI_MODEL'] || '',
     baseURL: kimi ? process.env.MOONSHOT_BASE_URL || 'https://api.moonshot.cn/v1' : '',
     configured: Boolean(process.env[kimi ? 'MOONSHOT_API_KEY' : 'OPENAI_API_KEY']),
+    jev: jevConfiguration(),
   };
 }
 
@@ -64,6 +66,29 @@ function handle(name, action) {
 }
 
 handle('state', state);
+handle('jev-save', async (input) => {
+  if (!input || typeof input.enabled !== 'boolean' || typeof input.apiKey !== 'string' ||
+      !Number.isFinite(input.minConfidence) || input.minConfidence < 0 || input.minConfidence > 1) throw new Error('Invalid Jev settings.');
+  const model = text(input.model, 'Jev model', 200);
+  const apiKey = input.apiKey.trim() || process.env.TYPESAFE_API_KEY || '';
+  if (input.enabled && !apiKey) throw new Error('Enter a TypeSafe API key.');
+  const values = { JEV_ENABLED: String(input.enabled), JEV_MODEL: model, JEV_MIN_CONFIDENCE: String(input.minConfidence), TYPESAFE_API_KEY: apiKey };
+  if (apiKey.length > 2000 || Object.values(values).some((value) => /[\r\n"\\]/.test(value))) throw new Error('Configuration contains unsupported characters.');
+  let existing = '';
+  try { existing = await readFile(configPath, 'utf8'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  const preserved = existing.split('\n').filter((line) => {
+    const match = line.match(/^\s*(?:export\s+)?([A-Z_][A-Z_0-9]*)\s*=/);
+    return !match || !Object.hasOwn(values, match[1]);
+  }).join('\n').trimEnd();
+  const temporary = `${configPath}.jev-tmp`;
+  await writeFile(temporary, `${preserved}\n${Object.entries(values).map(([key, value]) => `${key}="${value}"`).join('\n')}\n`, { mode: 0o600 });
+  await rename(temporary, configPath);
+  Object.assign(process.env, values);
+  await runtime?.close();
+  runtime = undefined;
+  history = [];
+  events = [];
+});
 handle('mcp-list', () => loadMcpServers());
 handle('mcp-pick-directory', async () => {
   const result = await dialog.showOpenDialog(window, { properties: ['openDirectory', 'createDirectory'] });

@@ -91,3 +91,23 @@ Saving, enabling, disabling, or removing a server closes existing MCP connection
 The app stores up to 16 server configurations in `MCP_SERVERS_BASE64` in its local `.env`. This is base64-encoded JSON to preserve quotes and multiline environment values, **not encryption**. The packaged app uses `~/Library/Application Support/agent0/.env`; development uses the project `.env` or the configured profile directory. The CLI reads the same variable from its `.env`.
 
 Only configure commands you intend to run: testing and using a server launches its executable with your account's permissions. Server dependencies must already be available or installable by the configured package runner.
+
+## Jev routing
+
+Jev routing is optional and disabled by default. Open **Jev routing** in the desktop sidebar, enter a TypeSafe API key, enable routing, and save. Saving starts a new conversation and preserves saved memory. Blank key fields keep the existing key. The same settings work in the CLI through `.env`:
+
+```dotenv
+JEV_ENABLED=true
+TYPESAFE_API_KEY=your-typesafe-api-key
+JEV_MODEL=jev-latest
+JEV_MIN_CONFIDENCE=0.8
+JEV_TIMEOUT_MS=3000
+```
+
+The runtime calls the [TypeSafe Choice API](https://docs.typesafe.ai/api) before each main-model step. When confidence meets the threshold, only the selected tool is offered to the main model, which still generates arguments or a text reply. Jev does not execute tools or grant permissions. Subagent text generation does not use routing.
+
+Low confidence, a deferred decision, a missing key, a timeout, HTTP errors, or malformed responses restore the complete tool list. Contexts exceeding 64,000 serialized characters or more than 254 tools also use the main model directly. Activity and local traces show the fallback reason, decision probabilities when available, model, and request duration. Confidence is supplied by Jev and is not a measured success rate for agent0; tune the default threshold against your own tasks.
+
+Enabling routing sends the current model context (including memory, task state, conversation, and tool results) and tool descriptions to TypeSafe. Keys remain in the local `.env` and are omitted from renderer state and routing traces. Each routing request adds latency and TypeSafe usage charges; real-world speed and quality depend on the task and have not been benchmarked here.
+
+Advanced configuration: `JEV_ENDPOINT` overrides the full endpoint URL, defaulting to `https://api.typesafe.ai/v1/systemone`. HTTPS is required except for loopback HTTP used in local tests. Requests do not follow redirects. `JEV_TIMEOUT_MS` must be an integer from 1 to 30,000; minimum confidence must be between 0 and 1.
