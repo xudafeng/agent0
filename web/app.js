@@ -1,8 +1,14 @@
+import { applyLanguage, setLanguage, t } from './i18n.js';
+
 const $ = (id) => document.getElementById(id);
 const api = window.agent0;
 let current;
 let sending = false;
 let renderedHistory = '';
+let progressEvent;
+let keepSavedKey = false;
+
+applyLanguage();
 
 function element(tag, className, value) {
   const node = document.createElement(tag);
@@ -12,7 +18,9 @@ function element(tag, className, value) {
 }
 
 function showError(error, target = 'error') {
-  $(target).textContent = error.message.replace(/^Error invoking remote method '[^']+': Error: /, '');
+  const message = error.message.replace(/^Error invoking remote method '[^']+': Error: /, '');
+  $(target).dataset.error = message;
+  $(target).textContent = t(message);
   $(target).hidden = false;
 }
 
@@ -20,8 +28,8 @@ function render(state) {
   current = state;
   const { config, history, busy, task, memory, events } = state;
   const locked = busy || sending;
-  $('connection-label').textContent = busy ? 'Working' : config.configured ? 'Ready' : 'Setup needed';
-  $('model-label').textContent = config.model || 'Connect a model to get started';
+  $('connection-label').textContent = busy ? t('Working') : config.configured ? t('Ready') : t('Setup needed');
+  $('model-label').textContent = config.model || t('Connect a model to get started');
   $('send').disabled = locked || !$('prompt').value.trim();
   $('new-chat').disabled = locked;
   $('settings-button').disabled = locked;
@@ -34,11 +42,11 @@ function render(state) {
     renderedHistory = serialized;
     $('conversation').replaceChildren(...history.map((message) => {
       const row = element('article', `message ${message.role}`);
-      row.append(element('div', 'avatar', message.role === 'user' ? 'You' : 'a0'));
+      row.append(element('div', 'avatar', message.role === 'user' ? t('You') : 'a0'));
       const body = element('div', 'message-body');
-      body.append(element('div', 'message-name', message.role === 'user' ? 'You' : message.role === 'error' ? 'Something went wrong' : 'agent0'));
-      body.append(element('div', 'message-content', message.content));
-      if (message.steps) body.append(element('div', 'message-meta', `Completed in ${message.steps} ${message.steps === 1 ? 'step' : 'steps'}`));
+      body.append(element('div', 'message-name', message.role === 'user' ? t('You') : message.role === 'error' ? t('Something went wrong') : 'agent0'));
+      body.append(element('div', 'message-content', message.role === 'error' ? t(message.content) : message.content));
+      if (message.steps) body.append(element('div', 'message-meta', t(message.steps === 1 ? 'Completed in {count} step' : 'Completed in {count} steps', { count: message.steps })));
       row.append(body);
       return row;
     }));
@@ -53,9 +61,9 @@ function render(state) {
       row.append(element('span', '', step.status === 'completed' ? '✓' : step.status === 'in_progress' ? '◉' : '○'), element('span', '', step.description));
       $('task').append(row);
     }
-  } else $('task').textContent = 'A little structure goes a long way. Your task plan will appear here.';
+  } else $('task').textContent = t('A little structure goes a long way. Your task plan will appear here.');
   const memoryContent = memory.replace(/^# Memory\s*/, '').trim();
-  $('memory').textContent = memoryContent || 'Save useful context for future conversations.';
+  $('memory').textContent = memoryContent || t('Save useful context for future conversations.');
   $('memory').classList.toggle('empty-panel', !memoryContent);
   const activity = events.filter((event) => ['tool_call', 'tool_result', 'run_error', 'final_answer'].includes(event.type));
   $('activity-count').textContent = activity.length;
@@ -64,11 +72,11 @@ function render(state) {
     $('activity').dataset.snapshot = JSON.stringify(activity);
     $('activity').replaceChildren(...activity.map((event) => {
       const details = element('details', '');
-      const label = event.type === 'tool_call' ? `↗ ${event.data.name}` : event.type === 'tool_result' ? `✓ ${event.data.name} returned` : event.type === 'run_error' ? 'Run failed' : 'Response ready';
+      const label = event.type === 'tool_call' ? `↗ ${event.data.name}` : event.type === 'tool_result' ? `✓ ${t('{name} returned', { name: event.data.name })}` : event.type === 'run_error' ? t('Run failed') : t('Response ready');
       details.append(element('summary', '', label), element('pre', '', JSON.stringify(event.data, null, 2)));
       return details;
     }));
-    if (!activity.length) $('activity').textContent = 'Tool calls and progress, as they happen.';
+    if (!activity.length) $('activity').textContent = t('Tool calls and progress, as they happen.');
   }
 }
 
@@ -78,19 +86,39 @@ function settings() {
   $('model').value = config.model;
   $('base-url').value = config.baseURL || 'https://api.moonshot.cn/v1';
   $('api-key').value = '';
-  $('api-key').placeholder = config.configured ? 'Leave blank to keep the saved key' : 'Enter your API key';
+  keepSavedKey = config.configured;
+  $('api-key').placeholder = keepSavedKey ? t('Leave blank to keep the saved key') : t('Enter your API key');
   $('settings-error').hidden = true;
   $('base-url-field').hidden = $('provider').value === 'openai';
   $('settings').showModal();
 }
 
+function renderProgress() {
+  $('progress-label').textContent = progressEvent?.type === 'tool_call'
+    ? t('Using {name}…', { name: progressEvent.data.name })
+    : progressEvent?.type === 'tool_result' ? t('Thinking about the result…') : t('Thinking…');
+}
+
+for (const select of document.querySelectorAll('[data-language]')) select.onchange = () => {
+  setLanguage(select.value);
+  renderedHistory = '';
+  delete $('activity').dataset.snapshot;
+  if (current) render(current);
+  renderProgress();
+  $('api-key').placeholder = keepSavedKey ? t('Leave blank to keep the saved key') : t('Enter your API key');
+  for (const target of ['error', 'settings-error']) {
+    if ($(target).dataset.error) $(target).textContent = t($(target).dataset.error);
+  }
+};
+
 $('settings-button').onclick = settings;
 $('close-settings').onclick = () => $('settings').close();
 $('provider').onchange = () => {
+  keepSavedKey = false;
   $('base-url-field').hidden = $('provider').value === 'openai';
   $('model').value = '';
   $('api-key').value = '';
-  $('api-key').placeholder = 'Enter your API key';
+  $('api-key').placeholder = t('Enter your API key');
 };
 $('settings-form').onsubmit = async (event) => {
   event.preventDefault();
@@ -113,7 +141,8 @@ $('chat-form').onsubmit = async (event) => {
   sending = true;
   $('error').hidden = true;
   $('prompt').value = '';
-  $('progress-label').textContent = 'Thinking…';
+  progressEvent = undefined;
+  renderProgress();
   render(current);
   try { await api.send(value); }
   catch (error) { showError(error); if (!current.history.some((message) => message.role === 'user' && message.content === value)) $('prompt').value = value; }
@@ -143,6 +172,6 @@ $('memory-form').onsubmit = async (event) => {
 };
 api.onEvent(({ type, data }) => {
   if (type === 'state') render(data);
-  if (type === 'trace') $('progress-label').textContent = data.type === 'tool_call' ? `Using ${data.data.name}…` : data.type === 'tool_result' ? 'Thinking about the result…' : 'Thinking…';
+  if (type === 'trace') { progressEvent = data; renderProgress(); }
 });
 try { render(await api.state()); if (!current.config.configured) settings(); } catch (error) { showError(error); }

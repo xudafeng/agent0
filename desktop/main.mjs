@@ -7,6 +7,7 @@ import { createAgentRuntime } from '../dist/runtime.js';
 import { loadMemory } from '../dist/memory.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
+const icon = path.join(root, 'desktop/assets/icon.png');
 let window;
 let runtime;
 let busy = false;
@@ -117,6 +118,7 @@ handle('configure', async (input) => {
 });
 
 app.whenReady().then(async () => {
+  if (process.platform === 'darwin') app.dock.setIcon(icon);
   const dataDirectory = app.isPackaged ? app.getPath('userData') : process.env.AGENT0_PROFILE_DIR || root;
   await mkdir(dataDirectory, { recursive: true });
   process.chdir(dataDirectory);
@@ -131,6 +133,7 @@ app.whenReady().then(async () => {
     window = new BrowserWindow({
       width: 1320, height: 860, minWidth: 860, minHeight: 620,
       title: 'agent0', backgroundColor: '#f6f7f9', titleBarStyle: 'hiddenInset',
+      icon,
       webPreferences: { preload: path.join(root, 'desktop/preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
     });
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));

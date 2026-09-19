@@ -17,6 +17,7 @@ The app opens a native desktop window. Choose **Model settings**, select Kimi or
 - Watch tool activity and the agent's task plan in the workspace panel.
 - Save useful context in Memory to reuse across conversations.
 - Choose New conversation (Cmd/Ctrl + N) to clear the chat and plan while keeping memory.
+- Switch between English and Simplified Chinese using Language in the sidebar or model settings. The interface initially follows your system language and remembers your choice locally. Conversation content stays in its original language.
 
 Model responses appear when each agent run finishes; tool activity updates during the run. The current conversation survives a window reload and stays in memory until you start a new conversation or quit. Saved memory and model settings persist after quitting.
 
@@ -29,6 +30,8 @@ pnpm package
 Open `release/mac-arm64/agent0.app` on Apple Silicon (or `release/mac/agent0.app` on Intel). You can copy the app into Applications. This local build is unsigned and is not notarized for distribution.
 
 The packaged app stores settings in `~/Library/Application Support/agent0/.env`, with memory and traces in its `data` directory. Development uses the project's `.env` and `data` directory. API keys are stored locally in plaintext and are never bundled into the app. Requests go to the configured model provider.
+
+The application icon lives in `desktop/assets`. After editing `icon.svg`, run `pnpm build:icons` on macOS to regenerate the PNG and ICNS assets, then run `pnpm package` to rebuild the app.
 
 ## Command line
 
