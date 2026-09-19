@@ -36,6 +36,23 @@ The packaged app stores settings in `~/Library/Application Support/agent0/.env`,
 
 The application icon lives in `desktop/assets`. After editing `icon.svg`, run `pnpm build:icons` on macOS to regenerate the PNG and ICNS assets, then run `pnpm package` to rebuild the app.
 
+## GitHub Actions builds
+
+The **Build Electron app** workflow runs on branch pushes, `v*` tags, pull requests, and manual dispatch. It uses the pinned pnpm version and resolves dependencies from `package.json` with `pnpm install --no-frozen-lockfile`, then runs typechecking and unit tests and packages these downloads. Lockfiles are ignored, so resolved dependency versions can change between builds:
+
+| Platform | Architecture | Download |
+| --- | --- | --- |
+| macOS | Apple Silicon (arm64) | ZIP containing `agent0.app` |
+| macOS | Intel (x64) | ZIP containing `agent0.app` |
+| Windows | x64 | NSIS `.exe` installer |
+| Linux | x64 | `.AppImage` |
+
+Open **Actions → Build Electron app → a successful run → Artifacts** and download the matching platform. Extract the artifact archive first. On macOS, extract the application ZIP and move `agent0.app` into Applications. On Linux, make the AppImage executable before launching it. Downloads expire after 14 days.
+
+To start a build manually, use **Run workflow** after this workflow is merged into the default branch. Branch pushes trigger builds before merge. Builds are unsigned and macOS builds are not notarized; operating systems may require approval to open them. No signing secrets or model API keys are needed in CI. Users configure their own API keys in the app. This workflow uploads Actions artifacts and does not publish GitHub Releases.
+
+The Apple Silicon build also runs the desktop integration smoke test. Intel macOS is cross-packaged on the same Apple Silicon runner; Windows, Linux, and Intel application launch behavior still needs testing on those systems.
+
 ## Command line
 
 ```bash

@@ -1,0 +1,95 @@
+name: Build Electron app
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: electron-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Typecheck and tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/setup@v2
+        with:
+          runtime: node@22
+          cache: true
+          cache-dependency-path: package.json
+          install: false
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+
+  build:
+    name: Package ${{ matrix.platform }} ${{ matrix.arch }}
+    needs: checks
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: mac
+            runner: macos-15
+            arch: arm64
+            target: zip
+            extension: zip
+          # Cross-package Intel on Apple Silicon; pnpm 11 has no Intel macOS binary.
+          - platform: mac
+            runner: macos-15
+            arch: x64
+            target: zip
+            extension: zip
+          - platform: win
+            runner: windows-2025
+            arch: x64
+            target: nsis
+            extension: exe
+          - platform: linux
+            runner: ubuntu-24.04
+            arch: x64
+            target: AppImage
+            extension: AppImage
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/setup@v2
+        with:
+          runtime: node@22
+          cache: true
+          cache-dependency-path: package.json
+          install: false
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+      - name: Verify desktop integration
+        if: matrix.platform == 'mac' && matrix.arch == 'arm64'
+        run: pnpm test:desktop
+      - name: Compile application
+        run: pnpm build
+      - name: Package application
+        run: pnpm exec electron-builder --${{ matrix.platform }} ${{ matrix.target }} --${{ matrix.arch }} --publish never
+      - name: Upload application
+        uses: actions/upload-artifact@v7
+        with:
+          name: agent0-${{ matrix.platform }}-${{ matrix.arch }}-${{ github.sha }}
+          path: release/*.${{ matrix.extension }}
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
