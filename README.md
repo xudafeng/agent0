@@ -2,6 +2,8 @@
 
 A desktop AI agent with conversations, live tool activity, task planning, MCP integration, and persistent memory.
 
+![agent0 desktop app showing the conversation view and agent workspace](docs/images/agent0-desktop.png)
+
 ## Desktop app
 
 ```bash
