@@ -12,6 +12,7 @@ export function setupJevSettings() {
     $('jev-error').hidden = true;
     $('jev-settings').showModal();
   };
+  $('jev-welcome-button').onclick = () => $('jev-button').click();
   $('close-jev').onclick = () => $('jev-settings').close();
   $('jev-settings').addEventListener('close', () => { $('jev-key').value = ''; });
   $('jev-form').onsubmit = async (event) => {
@@ -32,6 +33,8 @@ export function setupJevSettings() {
       config = value;
       $('jev-button').disabled = busy;
       $('jev-save').disabled = busy;
+      $('jev-welcome-button').disabled = busy;
+      $('jev-welcome-label').textContent = t(value.enabled && value.configured ? 'Manage Jev' : 'Set up Jev');
       $('jev-status').textContent = t(value.enabled ? (value.configured ? 'Enabled' : 'Setup needed') : 'Disabled');
     },
   };
