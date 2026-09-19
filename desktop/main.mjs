@@ -1,10 +1,12 @@
-import { app, BrowserWindow, ipcMain, Menu } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron';
 import { fileURLToPath } from 'node:url';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rename, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import dotenv from 'dotenv';
 import { createAgentRuntime } from '../dist/runtime.js';
 import { loadMemory } from '../dist/memory.js';
+import { checkMcpServers, connectMcpServer } from '../dist/mcp.js';
+import { encodeMcpServers, loadMcpServers, mcpConfigKey, validateMcpServers } from '../dist/mcp-config.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const icon = path.join(root, 'desktop/assets/icon.png');
@@ -48,7 +50,7 @@ function text(value, name, limit = 32000) {
 function handle(name, action) {
   ipcMain.handle(`agent:${name}`, async (event, payload) => {
     if (event.sender !== window?.webContents || event.senderFrame !== window.webContents.mainFrame) throw new Error('Unknown sender.');
-    if (name === 'state') return action(payload);
+    if (name === 'state' || name === 'mcp-list') return action(payload);
     if (busy) throw new Error('Wait for the current operation to finish.');
     busy = true;
     publish('state', state());
@@ -62,6 +64,38 @@ function handle(name, action) {
 }
 
 handle('state', state);
+handle('mcp-list', () => loadMcpServers());
+handle('mcp-pick-directory', async () => {
+  const result = await dialog.showOpenDialog(window, { properties: ['openDirectory', 'createDirectory'] });
+  if (result.canceled || !result.filePaths[0]) return null;
+  return realpath(result.filePaths[0]);
+});
+handle('mcp-check', async (id) => {
+  const servers = loadMcpServers();
+  if (id !== undefined && (typeof id !== 'string' || !servers.some((server) => server.id === id))) throw new Error('Unknown MCP server.');
+  return checkMcpServers(id === undefined ? servers : servers.filter((server) => server.id === id));
+});
+handle('mcp-test', async (input) => {
+  const [server] = validateMcpServers([input]);
+  const connection = await connectMcpServer(server, false);
+  try { return connection.tools; }
+  finally { await connection.close(); }
+});
+handle('mcp-save', async (input) => {
+  const encoded = encodeMcpServers(input);
+  let existing = '';
+  try { existing = await readFile(configPath, 'utf8'); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  const preserved = existing.split('\n').filter((line) => !/^\s*(?:export\s+)?MCP_SERVERS_BASE64\s*=/.test(line)).join('\n').trimEnd();
+  const temporary = `${configPath}.mcp-tmp`;
+  await writeFile(temporary, `${preserved}\n${mcpConfigKey}=${encoded}\n`, { mode: 0o600 });
+  await rename(temporary, configPath);
+  process.env[mcpConfigKey] = encoded;
+  await runtime?.close();
+  runtime = undefined;
+  history = [];
+  events = [];
+});
 handle('send', async (prompt) => {
   const value = text(prompt, 'message');
   const agent = await getRuntime();

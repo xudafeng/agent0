@@ -14,7 +14,7 @@
     <div class="section-label" data-i18n="WORKSPACE">WORKSPACE</div>
     <div class="nav-item active"><span>◈</span> <span data-i18n="Conversation">Conversation</span> <span class="nav-dot"></span></div>
     <div class="session-note"><span data-i18n="Your space to think,">Your space to think,</span><br><span data-i18n="plan, and get things done.">plan, and get things done.</span></div>
-    <div class="sidebar-bottom"><label class="language-control"><span data-i18n="Language">Language</span><select data-language aria-label="Language" data-i18n-aria-label="Language"><option value="en">English</option><option value="zh">简体中文</option></select></label><div class="local-label"><span class="dot"></span> <span data-i18n="Runs on your computer">Runs on your computer</span></div><button id="settings-button" class="settings-button">⚙ <span data-i18n="Model settings">Model settings</span><span>↗</span></button></div>
+    <div class="sidebar-bottom"><label class="language-control"><span data-i18n="Language">Language</span><select data-language aria-label="Language" data-i18n-aria-label="Language"><option value="en">English</option><option value="zh">简体中文</option></select></label><div class="local-label"><span class="dot"></span> <span data-i18n="Runs on your computer">Runs on your computer</span></div><button id="mcp-button" class="settings-button"><span>◇</span><span data-i18n="MCP servers">MCP servers</span><span>↗</span></button><button id="settings-button" class="settings-button">⚙ <span data-i18n="Model settings">Model settings</span><span>↗</span></button></div>
   </aside>
   <main>
     <header><div><span class="breadcrumb" data-i18n="Workspace /">Workspace /</span> <span data-i18n="Conversation">Conversation</span></div><div class="connection"><span class="dot" id="status-dot"></span><span id="connection-label" data-i18n="Ready">Ready</span></div></header>
@@ -27,6 +27,52 @@
   <aside class="inspector"><div class="inspector-title"><span data-i18n="Agent workspace">Agent workspace</span> <span>◌</span></div><section><div class="panel-heading"><h2 data-i18n="Task plan">Task plan</h2><span>01</span></div><div id="task" class="empty-panel"><span data-i18n="A little structure goes a long way.">A little structure goes a long way.</span><br><span data-i18n="Your task plan will appear here.">Your task plan will appear here.</span></div></section><section><div class="panel-heading"><h2 data-i18n="Activity">Activity</h2><span id="activity-count">0</span></div><div id="activity" class="activity empty-panel"><span data-i18n="Tool calls and progress,">Tool calls and progress,</span><br><span data-i18n="as they happen.">as they happen.</span></div></section><section class="memory-section"><div class="panel-heading"><h2 data-i18n="Memory">Memory</h2><span>↗</span></div><div id="memory" class="memory empty-panel" data-i18n="Save useful context for future conversations.">Save useful context for future conversations.</div><form id="memory-form"><input id="memory-input" placeholder="Something to remember…" data-i18n-placeholder="Something to remember…" maxlength="4000" aria-label="Memory to save" data-i18n-aria-label="Memory to save"><button type="submit" title="Save memory" data-i18n-title="Save memory" aria-label="Save memory" data-i18n-aria-label="Save memory">＋</button></form><small class="muted" data-i18n="Stored locally across conversations.">Stored locally across conversations.</small></section><div class="inspector-footer" data-i18n="LESS FRICTION. MORE DOING.">LESS FRICTION. MORE DOING.</div></aside>
   <dialog id="settings"><form id="settings-form"><div class="dialog-heading"><div><div class="eyebrow" data-i18n="MAKE IT YOURS">MAKE IT YOURS</div><h2 data-i18n="Connect your model">Connect your model</h2></div><button type="button" id="close-settings" aria-label="Close settings" data-i18n-aria-label="Close settings">×</button></div><p data-i18n="Use your own API key to get started. Settings are saved on this computer.">Use your own API key to get started. Settings are saved on this computer.</p><label class="language-control"><span data-i18n="Language">Language</span><select data-language aria-label="Language" data-i18n-aria-label="Language"><option value="en">English</option><option value="zh">简体中文</option></select></label><label><span data-i18n="Provider">Provider</span><select id="provider"><option value="kimi">Kimi / Moonshot</option><option value="openai">OpenAI</option></select></label><label><span data-i18n="Model">Model</span><input id="model" required placeholder="Model ID from your provider" data-i18n-placeholder="Model ID from your provider"></label><label id="base-url-field"><span data-i18n="Base URL">Base URL</span><input id="base-url" type="url" value="https://api.moonshot.cn/v1"></label><label><span data-i18n="API key">API key</span><input id="api-key" type="password" autocomplete="off" placeholder="Enter your API key" data-i18n-placeholder="Enter your API key"></label><small class="muted" data-i18n="Keys are stored in a local .env file and sent only to your selected provider. Saving starts a new conversation.">Keys are stored in a local .env file and sent only to your selected provider. Saving starts a new conversation.</small><div id="settings-error" class="error-banner" role="alert" hidden></div><button class="primary" type="submit" id="save-settings" data-i18n="Save settings">Save settings</button></form></dialog>
   <dialog id="reset-dialog"><h2 data-i18n="Start a new conversation?">Start a new conversation?</h2><p data-i18n="This clears the current chat and task plan. Your saved memory stays.">This clears the current chat and task plan. Your saved memory stays.</p><div class="dialog-actions"><button id="cancel-reset" data-i18n="Keep chatting">Keep chatting</button><button id="confirm-reset" class="primary" data-i18n="New conversation">New conversation</button></div></dialog>
+  <dialog id="mcp-settings">
+    <div class="dialog-heading">
+      <h2 data-i18n="MCP servers">MCP servers</h2>
+      <button type="button" id="close-mcp" aria-label="Close settings" data-i18n-aria-label="Close settings">×</button>
+    </div>
+    <p data-i18n="Connect local or remote MCP services. Enabled services connect when a conversation needs them.">Connect local or remote MCP services. Enabled services connect when a conversation needs them.</p>
+    <p class="mcp-notice" data-i18n="Saving, enabling, or removing a server starts a new conversation. Your memory stays.">Saving, enabling, or removing a server starts a new conversation. Your memory stays.</p>
+    <div id="mcp-error" class="error-banner" role="alert" hidden></div>
+    <div class="mcp-layout">
+      <div class="mcp-sidebar">
+        <button type="button" id="mcp-filesystem" class="secondary" data-i18n="Built-in Filesystem">Built-in Filesystem</button>
+        <button type="button" id="mcp-add" class="secondary" data-i18n="Add server">Add server</button>
+        <button type="button" id="mcp-refresh" class="secondary" data-i18n="Refresh status">Refresh status</button>
+        <p class="muted" data-i18n="Status is based on the last connection check.">Status is based on the last connection check.</p>
+        <div id="mcp-list"></div>
+        <small class="muted" data-i18n="The built-in demo server is always available.">The built-in demo server is always available.</small>
+      </div>
+      <form id="mcp-form">
+        <section id="mcp-filesystem-fields" hidden>
+          <h3 data-i18n="Filesystem">Filesystem</h3>
+          <p data-i18n="Read, write, and organize files in your chosen folder. Bundled with agent0; no installation needed.">Read, write, and organize files in your chosen folder. Bundled with agent0; no installation needed.</p>
+          <label><span data-i18n="Allowed folder">Allowed folder</span><input id="mcp-directory" readonly placeholder="Choose a folder to get started" data-i18n-placeholder="Choose a folder to get started"></label>
+          <button type="button" id="mcp-pick-directory" class="secondary" data-i18n="Choose folder">Choose folder</button>
+          <p data-i18n="Only this folder and its subfolders are accessible. Save to enable access.">Only this folder and its subfolders are accessible. Save to enable access.</p>
+        </section>
+        <label data-mcp-external><span data-i18n="Connection type">Connection type</span><select id="mcp-transport"><option value="stdio" data-i18n="Local command (stdio)">Local command (stdio)</option><option value="http" data-i18n="Remote HTTP (Streamable HTTP)">Remote HTTP (Streamable HTTP)</option><option value="sse" data-i18n="Remote SSE (legacy)">Remote SSE (legacy)</option></select></label>
+        <label data-mcp-external><span data-i18n="Server ID">Server ID</span><input id="mcp-id" required pattern="[a-z][a-z0-9_\-]{0,23}" maxlength="24" placeholder="my-server"><small class="muted" data-i18n="Use lowercase letters, digits, hyphens, or underscores; start with a letter.">Use lowercase letters, digits, hyphens, or underscores; start with a letter.</small></label>
+        <label data-mcp-stdio><span data-i18n="Command">Command</span><input id="mcp-command" required placeholder="/absolute/path/to/pnpm"><small class="muted" data-i18n="Use an absolute executable path if the app cannot find your command.">Use an absolute executable path if the app cannot find your command.</small></label>
+        <label data-mcp-stdio><span data-i18n="Arguments (JSON array)">Arguments (JSON array)</span><textarea id="mcp-args" rows="2" spellcheck="false">[]</textarea></label>
+        <label data-mcp-stdio><span data-i18n="Environment variables (JSON object)">Environment variables (JSON object)</span><textarea id="mcp-env" rows="2" spellcheck="false">{}</textarea></label>
+        <label data-mcp-stdio><span data-i18n="Working directory">Working directory</span><input id="mcp-cwd" placeholder="Optional absolute directory" data-i18n-placeholder="Optional absolute directory"></label>
+        <section id="mcp-remote-fields" hidden>
+          <label><span data-i18n="Server URL">Server URL</span><input id="mcp-url" type="url" placeholder="https://example.com/mcp"><small class="muted" data-i18n="Use the MCP endpoint URL provided by your service.">Use the MCP endpoint URL provided by your service.</small></label>
+          <label><span data-i18n="Request headers (JSON object)">Request headers (JSON object)</span><textarea id="mcp-headers" rows="3" spellcheck="false" placeholder='{"Authorization":"Bearer your-token"}'>{}</textarea></label>
+          <small class="muted" data-i18n="Optional: Authorization or API key headers. Browser OAuth sign-in is not supported yet.">Optional: Authorization or API key headers. Browser OAuth sign-in is not supported yet.</small>
+        </section>
+        <label class="mcp-enabled"><input id="mcp-enabled" type="checkbox" checked><span data-i18n="Enabled">Enabled</span></label>
+        <div class="mcp-actions">
+          <button type="button" id="mcp-test" class="secondary" data-i18n="Test connection">Test connection</button>
+          <button type="submit" id="mcp-save" class="primary" data-i18n="Save server">Save server</button>
+        </div>
+        <div id="mcp-result" role="status" aria-live="polite"></div>
+        <div id="mcp-tools"></div>
+      </form>
+    </div>
+  </dialog>
   <script type="module" src="app.js"></script>
 </body>
 </html>

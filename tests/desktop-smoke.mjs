@@ -1,22 +1,46 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import dotenv from 'dotenv';
+import { loadMcpServers } from '../dist/mcp-config.js';
 import { createServer } from 'node:http';
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, dialog } from 'electron';
+import { startRemoteMcp } from './fixtures/remote-mcp.mjs';
 
 const profile = await mkdtemp(join(tmpdir(), 'agent0-smoke-'));
+await mkdir(join(profile, 'workspace'));
+const workspace = await realpath(join(profile, 'workspace'));
+await writeFile(join(workspace, 'note.txt'), 'Bundled filesystem works.');
 app.setPath('userData', profile);
 process.env.AGENT0_PROFILE_DIR = profile;
+const remoteFixture = await startRemoteMcp();
 let calls = 0;
 const server = createServer(async (request, response) => {
   let body = '';
   for await (const chunk of request) body += chunk;
-  assert.ok(JSON.parse(body).messages.length > 0);
+  const input = JSON.parse(body);
+  assert.ok(input.messages.length > 0);
+  const mcpTool = input.tools.find((tool) => tool.function.name.startsWith('mcp_smoke__greet_'));
+  const filesystemTool = input.tools.find((tool) => tool.function.name.startsWith('mcp_builtin-filesystem__read_text_file_'));
+  const remoteTool = input.tools.find((tool) => tool.function.name.startsWith('mcp_remote__echo_'));
+  assert.ok(mcpTool);
+  assert.ok(filesystemTool);
+  assert.ok(remoteTool);
   calls += 1;
   const message = calls === 1
     ? { content: null, tool_calls: [{ id: 'plan-1', type: 'function', function: { name: 'set_plan', arguments: JSON.stringify({ goal: 'Desktop verification', steps: ['Check desktop integration'] }) } }] }
-    : { content: 'Desktop integration works. Your agent is ready.' };
+    : calls === 2
+      ? { content: null, tool_calls: [{ id: 'mcp-1', type: 'function', function: { name: mcpTool.function.name, arguments: JSON.stringify({ name: 'MCP desktop' }) } }] }
+      : calls === 3
+        ? { content: null, tool_calls: [{ id: 'filesystem-1', type: 'function', function: { name: filesystemTool.function.name, arguments: JSON.stringify({ path: join(workspace, 'note.txt') }) } }] }
+        : calls === 4
+          ? { content: null, tool_calls: [{ id: 'remote-1', type: 'function', function: { name: remoteTool.function.name, arguments: JSON.stringify({ message: 'desktop remote works' }) } }] }
+          : { content: 'Desktop integration works. Your agent is ready.' };
+  if (calls === 3) assert.ok(input.messages.some((message) => message.role === 'tool' && message.content.includes('Hello, MCP desktop!')));
+  if (calls === 4) assert.ok(input.messages.some((message) => message.role === 'tool' && message.content.includes('Bundled filesystem works.')));
+  if (calls === 5) assert.ok(input.messages.some((message) => message.role === 'tool' && message.content.includes('Remote: desktop remote works')));
   response.writeHead(200, { 'content-type': 'application/json' });
   response.end(JSON.stringify({ id: `test-${calls}`, model: 'test-model', choices: [{ message, finish_reason: 'stop' }] }));
 });
@@ -74,15 +98,126 @@ try {
   await waitFor('!document.getElementById(\'settings\').open');
   assert.ok((await readFile(join(profile, '.env'), 'utf8')).includes('CUSTOM_SETTING=preserved'));
   assert.equal((await evaluate('window.agent0.state()')).config.apiKey, undefined);
+  await evaluate('document.getElementById(\'mcp-button\').click()');
+  await waitFor('document.getElementById(\'mcp-settings\').open && !document.getElementById(\'mcp-save\').disabled');
+  const mcpServer = {
+    id: 'smoke', command: process.execPath,
+    args: [fileURLToPath(new URL('../dist/mcp-server.js', import.meta.url))],
+    env: { ELECTRON_RUN_AS_NODE: '1', TEST_SECRET: 'local-only' },
+  };
+  await evaluate(`
+    document.getElementById('mcp-id').value = ${JSON.stringify(mcpServer.id)};
+    document.getElementById('mcp-command').value = ${JSON.stringify(mcpServer.command)};
+    document.getElementById('mcp-args').value = 'invalid JSON';
+    document.getElementById('mcp-test').click();
+  `);
+  assert.ok(await evaluate('!document.getElementById(\'mcp-error\').hidden'));
+  await evaluate(`
+    document.getElementById('mcp-args').value = ${JSON.stringify(JSON.stringify(mcpServer.args))};
+    document.getElementById('mcp-env').value = ${JSON.stringify(JSON.stringify(mcpServer.env))};
+    document.getElementById('mcp-test').click();
+  `);
+  await waitFor('!document.getElementById(\'mcp-test\').disabled && document.getElementById(\'mcp-tools\').textContent.includes(\'greet\')');
+  assert.equal((await evaluate('window.agent0.mcpList()')).length, 0);
+  await writeFile(join(profile, 'mcp-settings.png'), (await window.webContents.capturePage()).toPNG());
+  await evaluate('document.getElementById(\'mcp-form\').requestSubmit()');
+  await waitFor('document.querySelector(\'.mcp-server\') && !document.getElementById(\'mcp-save\').disabled');
+  assert.equal(await evaluate('document.querySelector(\'.mcp-server\').dataset.connection'), 'reachable');
+  await switchLanguage('en');
+  assert.equal(await evaluate('document.querySelector(\'.mcp-connection\').textContent'), 'Reachable');
+  await switchLanguage('zh');
+  assert.equal(await evaluate('document.querySelector(\'.mcp-connection\').textContent'), '可连接');
+  await evaluate('document.querySelector(\'.mcp-server-actions button\').click()');
+  await waitFor('!document.getElementById(\'mcp-enabled\').checked && !document.getElementById(\'mcp-save\').disabled');
+  assert.equal((await evaluate('window.agent0.mcpList()'))[0].enabled, false);
+  assert.equal(await evaluate('document.querySelector(\'.mcp-server\').dataset.connection'), 'disabled');
+  await evaluate('document.querySelector(\'.mcp-server-actions button\').click()');
+  await waitFor('document.getElementById(\'mcp-enabled\').checked && !document.getElementById(\'mcp-save\').disabled');
+  const savedEnv = dotenv.parse(await readFile(join(profile, '.env')));
+  assert.equal(savedEnv.CUSTOM_SETTING, 'preserved');
+  assert.equal(savedEnv.MOONSHOT_API_KEY, 'test-key');
+  assert.equal(loadMcpServers(savedEnv.MCP_SERVERS_BASE64)[0].env.TEST_SECRET, 'local-only');
+  assert.ok(!JSON.stringify(await evaluate('window.agent0.state()')).includes('local-only'));
+  await evaluate(`
+    document.getElementById('mcp-add').click();
+    document.getElementById('mcp-id').value = 'broken';
+    document.getElementById('mcp-command').value = '/missing/executable';
+    document.getElementById('mcp-form').requestSubmit();
+  `);
+  await waitFor('document.querySelector(\'[data-server-id="broken"]\')?.dataset.connection === \'failed\' && !document.getElementById(\'mcp-save\').disabled');
+  assert.ok(await evaluate('document.querySelector(\'[data-server-id="broken"] .mcp-connection-error\').textContent.includes(\'ENOENT\')'));
+  await writeFile(join(profile, 'mcp-connectivity.png'), (await window.webContents.capturePage()).toPNG());
+  await evaluate('document.getElementById(\'mcp-refresh\').click()');
+  assert.equal(await evaluate('document.querySelector(\'[data-server-id="smoke"]\').dataset.connection'), 'checking');
+  await waitFor('!document.getElementById(\'mcp-refresh\').disabled');
+  assert.equal(await evaluate('document.querySelector(\'[data-server-id="smoke"]\').dataset.connection'), 'reachable');
+  assert.equal(await evaluate('document.querySelector(\'[data-server-id="broken"]\').dataset.connection'), 'failed');
+  await evaluate(`
+    document.getElementById('mcp-command').value = ${JSON.stringify(mcpServer.command)};
+    document.getElementById('mcp-args').value = ${JSON.stringify(JSON.stringify(mcpServer.args))};
+    document.getElementById('mcp-env').value = ${JSON.stringify(JSON.stringify(mcpServer.env))};
+    document.getElementById('mcp-form').requestSubmit();
+  `);
+  await waitFor('document.querySelector(\'[data-server-id="broken"]\')?.dataset.connection === \'reachable\' && !document.getElementById(\'mcp-save\').disabled');
+  assert.equal(await evaluate('document.querySelector(\'[data-server-id="broken"] .mcp-connection-error\')'), null);
+  await evaluate('document.querySelector(\'[data-server-id="broken"] .mcp-server-actions button:last-child\').click()');
+  await waitFor('!document.querySelector(\'[data-server-id="broken"]\') && !document.getElementById(\'mcp-save\').disabled');
+  await evaluate('document.getElementById(\'mcp-filesystem\').click(); document.getElementById(\'mcp-test\').click()');
+  assert.ok(await evaluate('document.getElementById(\'mcp-error\').textContent.includes(\'请先选择文件夹\')'));
+  const originalDialog = dialog.showOpenDialog;
+  dialog.showOpenDialog = async () => ({ canceled: true, filePaths: [] });
+  await evaluate('document.getElementById(\'mcp-pick-directory\').click()');
+  await waitFor('!document.getElementById(\'mcp-pick-directory\').disabled');
+  assert.equal(await evaluate('document.getElementById(\'mcp-directory\').value'), '');
+  dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [workspace] });
+  await evaluate('document.getElementById(\'mcp-pick-directory\').click()');
+  await waitFor('document.getElementById(\'mcp-directory\').value && !document.getElementById(\'mcp-pick-directory\').disabled');
+  dialog.showOpenDialog = originalDialog;
+  assert.equal(await evaluate('document.getElementById(\'mcp-directory\').value'), await realpath(workspace));
+  await evaluate('document.getElementById(\'mcp-test\').click()');
+  await waitFor('document.getElementById(\'mcp-tools\').textContent.includes(\'read_text_file\') && !document.getElementById(\'mcp-test\').disabled');
+  assert.equal((await evaluate('window.agent0.mcpList()')).length, 1);
+  await evaluate('document.getElementById(\'mcp-form\').requestSubmit()');
+  await waitFor('document.querySelector(\'[data-server-id="builtin-filesystem"]\')?.dataset.connection === \'reachable\' && !document.getElementById(\'mcp-save\').disabled');
+  await writeFile(join(profile, 'filesystem.png'), (await window.webContents.capturePage()).toPNG());
+  const filesystemConfig = (await evaluate('window.agent0.mcpList()')).find((item) => item.builtin);
+  assert.equal(filesystemConfig.directory, await realpath(workspace));
+  assert.equal(filesystemConfig.command, undefined);
+  await evaluate(`
+    document.getElementById('mcp-add').click();
+    document.getElementById('mcp-transport').value = 'http';
+    document.getElementById('mcp-transport').dispatchEvent(new Event('change'));
+    document.getElementById('mcp-id').value = 'remote';
+    document.getElementById('mcp-url').value = ${JSON.stringify(`${remoteFixture.url}/mcp`)};
+    document.getElementById('mcp-test').click();
+  `);
+  await waitFor('!document.getElementById(\'mcp-test\').disabled && !document.getElementById(\'mcp-error\').hidden');
+  assert.equal(await evaluate('document.getElementById(\'mcp-command\').required'), false);
+  await evaluate(`
+    document.getElementById('mcp-headers').value = ${JSON.stringify(JSON.stringify({ Authorization: 'Bearer test-remote-token' }))};
+    document.getElementById('mcp-test').click();
+  `);
+  await waitFor('!document.getElementById(\'mcp-test\').disabled && document.getElementById(\'mcp-tools\').textContent.includes(\'echo\')');
+  await evaluate('document.getElementById(\'mcp-form\').requestSubmit()');
+  await waitFor('document.querySelector(\'[data-server-id="remote"]\')?.dataset.connection === \'reachable\' && !document.getElementById(\'mcp-save\').disabled');
+  const remoteConfig = (await evaluate('window.agent0.mcpList()')).find((item) => item.id === 'remote');
+  assert.equal(remoteConfig.url, `${remoteFixture.url}/mcp`);
+  assert.equal(remoteConfig.transport, 'http');
+  assert.equal(remoteConfig.headers.Authorization, 'Bearer test-remote-token');
+  assert.ok(!JSON.stringify(await evaluate('window.agent0.state()')).includes('test-remote-token'));
+  await writeFile(join(profile, 'remote-mcp.png'), (await window.webContents.capturePage()).toPNG());
+  await evaluate('document.getElementById(\'close-mcp\').click()');
   await writeFile(join(profile, 'welcome.png'), (await window.webContents.capturePage()).toPNG());
   await evaluate(`document.getElementById('prompt').value = 'Create a plan'; document.getElementById('chat-form').requestSubmit();`);
   await waitFor('document.getElementById(\'conversation\').textContent.includes(\'Desktop integration works\')');
-  assert.equal(calls, 2);
+  assert.equal(calls, 5);
   assert.ok(await evaluate('document.getElementById(\'task\').textContent.includes(\'Desktop verification\')'));
   assert.ok(await evaluate('document.getElementById(\'activity\').textContent.includes(\'set_plan\')'));
   await evaluate('window.agent0.remember(\'Prefer concise answers\')');
   const before = await evaluate('window.agent0.state()');
   assert.ok(before.memory.includes('Prefer concise answers'));
+  await evaluate('window.agent0.mcpCheck()');
+  assert.deepEqual((await evaluate('window.agent0.state()')).history, before.history);
   await evaluate('document.getElementById(\'prompt\').value = \'Keep this draft\'');
   assert.equal(await evaluate('document.querySelector(\'.message.user .message-name\').textContent'), '你');
   assert.ok(await evaluate('document.querySelector(\'.message-meta\').textContent.includes(\'个步骤\')'));
@@ -104,15 +239,34 @@ try {
   assert.equal(after.history.length, 0);
   assert.equal(after.task, null);
   assert.ok(after.memory.includes('Prefer concise answers'));
+  await evaluate('document.getElementById(\'mcp-button\').click()');
+  await waitFor('document.getElementById(\'mcp-id\').value === \'smoke\' && !document.getElementById(\'mcp-save\').disabled');
+  await evaluate('document.querySelector(\'[data-server-id="remote"] .mcp-server-name\').click()');
+  assert.equal(await evaluate('document.getElementById(\'mcp-transport\').value'), 'http');
+  assert.equal(await evaluate('document.getElementById(\'mcp-url\').value'), `${remoteFixture.url}/mcp`);
+  await evaluate('document.querySelector(\'[data-server-id="remote"] .mcp-server-actions button:last-child\').click()');
+  await waitFor('!document.querySelector(\'[data-server-id="remote"]\') && !document.getElementById(\'mcp-save\').disabled');
+  await evaluate('document.getElementById(\'mcp-filesystem\').click()');
+  assert.equal(await evaluate('document.getElementById(\'mcp-directory\').value'), await realpath(workspace));
+  await evaluate('document.querySelector(\'[data-server-id="builtin-filesystem"] .mcp-server-actions button\').click()');
+  await waitFor('document.querySelector(\'[data-server-id="builtin-filesystem"]\')?.dataset.connection === \'disabled\' && !document.getElementById(\'mcp-save\').disabled');
+  await evaluate('document.querySelector(\'[data-server-id="builtin-filesystem"] .mcp-server-actions button:last-child\').click()');
+  await waitFor('!document.querySelector(\'[data-server-id="builtin-filesystem"]\') && !document.getElementById(\'mcp-save\').disabled');
+  await evaluate('document.querySelector(\'.mcp-server-actions button:last-child\').click()');
+  await waitFor('!document.querySelector(\'.mcp-server\') && !document.getElementById(\'mcp-save\').disabled');
+  assert.equal((await evaluate('window.agent0.mcpList()')).length, 0);
+  await evaluate('document.getElementById(\'close-mcp\').click()');
   assert.equal(errors.length, 0, errors.join('\n'));
-  console.log(`PASS: setup, chat, MCP startup, tool events, task plan, memory, language switching, persistence, reload, reset. Screenshots: ${profile}`);
+  console.log(`PASS: setup, chat, MCP settings, external tool calls, task plan, memory, language switching, persistence, reload, reset. Screenshots: ${profile}`);
   clearTimeout(deadline);
   server.close();
+  await remoteFixture.close();
   app.quit();
 } catch (error) {
   console.error(error);
   clearTimeout(deadline);
   server.close();
+  await remoteFixture.close();
   app.exit(1);
 }
 

@@ -1,6 +1,6 @@
 import { buildContext } from './context.js';
 import { loadMemory, remember as persistMemory } from './memory.js';
-import { connectLocalMcpServer } from './mcp.js';
+import { connectMcpServers } from './mcp.js';
 import { getProvider, type Message } from './provider.js';
 import { createSubagentRuntime } from './subagent.js';
 import { createTaskRuntime, formatTaskState, type TaskState } from './task.js';
@@ -29,7 +29,7 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
   const maxSteps = options.maxSteps ?? 8;
   const provider = getProvider();
   const messages: Message[] = [];
-  const mcp = await connectLocalMcpServer();
+  const mcp = await connectMcpServers();
   const taskRuntime = createTaskRuntime();
   const subagentRuntime = createSubagentRuntime(provider);
   const tools = [...localTools, ...taskRuntime.tools, ...subagentRuntime.tools, ...mcp.tools];
