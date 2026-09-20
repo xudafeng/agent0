@@ -22,6 +22,7 @@
     "@modelcontextprotocol/server-filesystem": "2026.8.31",
     "dotenv": "^17.2.2",
     "openai": "^7.15.0",
+    "yaml": "^2.9.1",
     "zod": "^4.0.0"
   },
   "devDependencies": {

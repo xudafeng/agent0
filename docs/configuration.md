@@ -111,3 +111,35 @@ Low confidence, a deferred decision, a missing key, a timeout, HTTP errors, or m
 Enabling routing sends the current model context (including memory, task state, conversation, and tool results) and tool descriptions to TypeSafe. Keys remain in the local `.env` and are omitted from renderer state and routing traces. Each routing request adds latency and TypeSafe usage charges; real-world speed and quality depend on the task and have not been benchmarked here.
 
 Advanced configuration: `JEV_ENDPOINT` overrides the full endpoint URL, defaulting to `https://api.typesafe.ai/v1/systemone`. HTTPS is required except for loopback HTTP used in local tests. Requests do not follow redirects. `JEV_TIMEOUT_MS` must be an integer from 1 to 30,000; minimum confidence must be between 0 and 1.
+
+## Skills
+
+Both the CLI and desktop agent discover skills when a conversation runtime starts. The default search order is `~/.agents/skills`, followed by `.agents/skills` under the current configuration directory. A later directory overrides an earlier skill with the same name. Development uses the project directory; packaged desktop builds use the application support directory. `AGENT0_PROFILE_DIR` overrides the directory for development builds.
+
+Place each skill in its own directory, for example `~/.agents/skills/code-review/SKILL.md`:
+
+```markdown
+---
+name: code-review
+description: Review code changes for correctness and missing validation.
+---
+Read the proposed changes and identify concrete correctness issues.
+Explain each finding with its location, impact, and suggested correction.
+Read references/checklist.md for the review checklist when needed.
+```
+
+The name must match the directory and contain at most 64 lowercase letters, digits, and single hyphens. A nonempty description of at most 1024 characters and a nonempty instruction body are required. YAML quoted and multiline descriptions are supported. Additional metadata is ignored. Discovery scans direct child directories only. Invalid files are skipped; `/skills` in the CLI lists valid skills and diagnostics.
+
+To replace the default search paths, set a JSON array of absolute directories in the local `.env`:
+
+```dotenv
+AGENT0_SKILL_DIRS='["/absolute/path/to/skills", "/another/skills"]'
+```
+
+Use `AGENT0_SKILL_DIRS='[]'` to disable discovery. Restart after editing `.env`. Start a new desktop conversation or restart the CLI after adding or changing skills to refresh the catalog and clear loaded instructions.
+
+Ask to use `$code-review`, or describe a matching task. The model receives the catalog and can call `load_skill` to load the body. Loaded instructions remain in context even when older conversation turns are trimmed. Explicit mentions are model-directed requests, not deterministic slash commands. Open **Skills** in the desktop sidebar to inspect the catalog, loaded status, search directories, and discovery errors, without configuring a model or connecting MCP servers. **Use skill** inserts a `$name` mention into your draft; add your task and send it. **Refresh status** updates the display without clearing the conversation; an existing conversation keeps its catalog until you start a new one. The Activity panel shows skill tool calls and results. Installation and directory configuration use the filesystem and `.env`.
+
+After loading, `read_skill_file` reads supporting UTF-8 text using a relative path inside that skill directory. Files are limited to 128 KiB each; directory traversal and symlinks pointing outside the skill directory are rejected. Skill directory symlinks are supported. Reading a script does not execute it, install dependencies, or add tools. Any workflow operations require tools already available to the agent, such as configured MCP tools. Isolated text-only subagents do not inherit loaded skills.
+
+Skill metadata, loaded instructions, and requested references are sent to the configured model, and to TypeSafe when Jev routing is enabled. Tool results are recorded in local traces. Install trusted workflows and keep credentials out of skill files.

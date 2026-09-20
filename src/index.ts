@@ -27,6 +27,13 @@ try {
       continue;
     }
 
+    if (prompt === '/skills') {
+      const { skills, diagnostics } = runtime.getSkills();
+      console.log(skills.map((skill) => `${skill.name}: ${skill.description}\n  ${skill.path}`).join('\n') || 'No skills found.');
+      for (const diagnostic of diagnostics) console.error(diagnostic);
+      continue;
+    }
+
     if (prompt.startsWith('/remember ')) {
       await runtime.remember(prompt.slice('/remember '.length));
       console.log('Remembered.');

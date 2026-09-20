@@ -5,6 +5,7 @@ import path from 'node:path';
 import dotenv from 'dotenv';
 import { createAgentRuntime } from '../dist/runtime.js';
 import { loadMemory } from '../dist/memory.js';
+import { createSkillRuntime, skillDirectories } from '../dist/skills.js';
 import { jevConfiguration } from '../dist/jev.js';
 import { checkMcpServers, connectMcpServer } from '../dist/mcp.js';
 import { encodeMcpServers, loadMcpServers, mcpConfigKey, validateMcpServers } from '../dist/mcp-config.js';
@@ -66,6 +67,12 @@ function handle(name, action) {
 }
 
 handle('state', state);
+handle('skills-list', async () => {
+  const directories = skillDirectories();
+  if (runtime) return { ...runtime.getSkills(), directories };
+  const skills = await createSkillRuntime(directories);
+  return { skills: skills.list(), diagnostics: skills.diagnostics, loaded: [], directories };
+});
 handle('jev-save', async (input) => {
   if (!input || typeof input.enabled !== 'boolean' || typeof input.apiKey !== 'string' ||
       !Number.isFinite(input.minConfidence) || input.minConfidence < 0 || input.minConfidence > 1) throw new Error('Invalid Jev settings.');

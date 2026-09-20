@@ -3,6 +3,7 @@ import { createJevRouter } from './jev.js';
 import { loadMemory, remember as persistMemory } from './memory.js';
 import { connectMcpServers } from './mcp.js';
 import { getProvider, type Message } from './provider.js';
+import { createSkillRuntime, type SkillSummary } from './skills.js';
 import { createSubagentRuntime } from './subagent.js';
 import { createTaskRuntime, formatTaskState, type TaskState } from './task.js';
 import { createTraceRecorder, type TraceEvent } from './trace.js';
@@ -10,6 +11,7 @@ import { executeTool, tools as localTools } from './tools.js';
 
 export interface RuntimeOptions {
   maxSteps?: number;
+  skillDirectories?: string[];
 }
 
 export interface RunResult {
@@ -23,6 +25,7 @@ export interface AgentRuntime {
   remember(content: string): Promise<void>;
   getMemory(): string;
   getTaskState(): TaskState | undefined;
+  getSkills(): { skills: SkillSummary[]; diagnostics: string[]; loaded: string[] };
   close(): Promise<void>;
 }
 
@@ -31,10 +34,11 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
   const provider = getProvider();
   const route = createJevRouter();
   const messages: Message[] = [];
+  const skills = await createSkillRuntime(options.skillDirectories);
   const mcp = await connectMcpServers();
   const taskRuntime = createTaskRuntime();
   const subagentRuntime = createSubagentRuntime(provider);
-  const tools = [...localTools, ...taskRuntime.tools, ...subagentRuntime.tools, ...mcp.tools];
+  const tools = [...localTools, ...skills.tools, ...taskRuntime.tools, ...subagentRuntime.tools, ...mcp.tools];
   let memory = await loadMemory();
 
   return {
@@ -50,7 +54,7 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
 
       try {
         for (let step = 1; step <= maxSteps; step += 1) {
-          const context = buildContext(memory, messages, taskRuntime.getState());
+          const context = buildContext(memory, messages, taskRuntime.getState(), skills.context());
           const routed = await route?.(context, tools);
           if (routed) await trace.record('jev_decision', { ...routed.decision }, step);
           const availableTools = routed?.tools ?? tools;
@@ -75,13 +79,15 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
             let toolContent: string;
             try {
               if (!availableTools.some((tool) => tool.name === toolCall.name)) throw new Error('Tool is not available for this step.');
-              const toolResult = taskRuntime.hasTool(toolCall.name)
-                ? taskRuntime.callTool(toolCall)
-                : subagentRuntime.hasTool(toolCall.name)
-                  ? await subagentRuntime.callTool(toolCall)
-                  : mcp.hasTool(toolCall.name)
-                    ? await mcp.callTool(toolCall)
-                    : executeTool(toolCall);
+              const toolResult = skills.hasTool(toolCall.name)
+                ? await skills.callTool(toolCall)
+                : taskRuntime.hasTool(toolCall.name)
+                  ? taskRuntime.callTool(toolCall)
+                  : subagentRuntime.hasTool(toolCall.name)
+                    ? await subagentRuntime.callTool(toolCall)
+                    : mcp.hasTool(toolCall.name)
+                      ? await mcp.callTool(toolCall)
+                      : executeTool(toolCall);
               toolContent = JSON.stringify({ ok: true, result: toolResult });
             } catch (error) {
               toolContent = JSON.stringify({
@@ -124,6 +130,10 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
 
     getTaskState() {
       return taskRuntime.getState();
+    },
+
+    getSkills() {
+      return { skills: skills.list(), diagnostics: [...skills.diagnostics], loaded: skills.loaded() };
     },
 
     async close() {

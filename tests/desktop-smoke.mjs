@@ -13,6 +13,11 @@ const profile = await mkdtemp(join(tmpdir(), 'agent0-smoke-'));
 await mkdir(join(profile, 'workspace'));
 const workspace = await realpath(join(profile, 'workspace'));
 await writeFile(join(workspace, 'note.txt'), 'Bundled filesystem works.');
+const skillDirectory = join(profile, 'skills');
+await mkdir(join(skillDirectory, 'desktop-check', 'references'), { recursive: true });
+await writeFile(join(skillDirectory, 'desktop-check', 'SKILL.md'), '---\nname: desktop-check\ndescription: Verify the desktop skill workflow.\n---\nUse the desktop verification checklist.\n');
+await writeFile(join(skillDirectory, 'desktop-check', 'references', 'checklist.md'), 'Skill reference works.');
+process.env.AGENT0_SKILL_DIRS = JSON.stringify([skillDirectory]);
 app.setPath('userData', profile);
 process.env.AGENT0_PROFILE_DIR = profile;
 const remoteFixture = await startRemoteMcp();
@@ -62,10 +67,19 @@ const server = createServer(async (request, response) => {
         ? { content: null, tool_calls: [{ id: 'filesystem-1', type: 'function', function: { name: filesystemTool.function.name, arguments: JSON.stringify({ path: join(workspace, 'note.txt') }) } }] }
         : calls === 4
           ? { content: null, tool_calls: [{ id: 'remote-1', type: 'function', function: { name: remoteTool.function.name, arguments: JSON.stringify({ message: 'desktop remote works' }) } }] }
-          : { content: 'Desktop integration works. Your agent is ready.' };
+          : calls === 5
+            ? { content: null, tool_calls: [{ id: 'skill-1', type: 'function', function: { name: 'load_skill', arguments: JSON.stringify({ name: 'desktop-check' }) } }] }
+            : calls === 6
+              ? { content: null, tool_calls: [{ id: 'skill-file-1', type: 'function', function: { name: 'read_skill_file', arguments: JSON.stringify({ name: 'desktop-check', path: 'references/checklist.md' }) } }] }
+              : { content: 'Desktop integration works. Your agent is ready.' };
   if (calls === 3) assert.ok(input.messages.some((message) => message.role === 'tool' && message.content.includes('Hello, MCP desktop!')));
   if (calls === 4) assert.ok(input.messages.some((message) => message.role === 'tool' && message.content.includes('Bundled filesystem works.')));
   if (calls === 5) assert.ok(input.messages.some((message) => message.role === 'tool' && message.content.includes('Remote: desktop remote works')));
+  assert.ok(input.tools.some((tool) => tool.function.name === 'load_skill'));
+  const system = input.messages.find((message) => message.role === 'system').content;
+  assert.ok(system.includes('desktop-check'));
+  assert.equal(system.includes('Use the desktop verification checklist.'), calls >= 6);
+  if (calls === 7) assert.ok(input.messages.some((message) => message.role === 'tool' && message.content.includes('Skill reference works.')));
   response.writeHead(200, { 'content-type': 'application/json' });
   response.end(JSON.stringify({ id: `test-${calls}`, model: 'test-model', choices: [{ message, finish_reason: 'stop' }] }));
 });
@@ -96,6 +110,11 @@ try {
     throw new Error(`Condition failed: ${source}`);
   }
   await waitFor('document.getElementById(\'settings\').open');
+  const initialSkills = await evaluate('window.agent0.skillsList()');
+  assert.equal(initialSkills.skills[0].name, 'desktop-check');
+  assert.deepEqual(initialSkills.loaded, []);
+  assert.equal(calls, 0);
+
   async function switchLanguage(language, selector = '.sidebar [data-language]') {
     await evaluate(`
       (() => {
@@ -127,6 +146,13 @@ try {
   await waitFor('!document.getElementById(\'settings\').open');
   assert.ok((await readFile(join(profile, '.env'), 'utf8')).includes('CUSTOM_SETTING=preserved'));
   assert.equal((await evaluate('window.agent0.state()')).config.apiKey, undefined);
+  await evaluate(`document.getElementById('skills-button').click()`);
+  await waitFor(`document.querySelector('.skill-card button') && !document.getElementById('skills-refresh').disabled`);
+  assert.ok(await evaluate(`document.getElementById('skills-list').textContent.includes('desktop-check')`));
+  await evaluate(`document.getElementById('prompt').value = 'Review my task'; document.querySelector('.skill-card button').click()`);
+  assert.equal(await evaluate(`document.getElementById('prompt').value`), '$desktop-check Review my task');
+  assert.equal(await evaluate(`document.getElementById('skills-dialog').open`), false);
+
   await evaluate('document.getElementById(\'mcp-button\').click()');
   await waitFor('document.getElementById(\'mcp-settings\').open && !document.getElementById(\'mcp-save\').disabled');
   const mcpServer = {
@@ -239,7 +265,14 @@ try {
   await writeFile(join(profile, 'welcome.png'), (await window.webContents.capturePage()).toPNG());
   await evaluate(`document.getElementById('prompt').value = 'Create a plan'; document.getElementById('chat-form').requestSubmit();`);
   await waitFor('document.getElementById(\'conversation\').textContent.includes(\'Desktop integration works\')');
-  assert.equal(calls, 5);
+  assert.equal(calls, 7);
+  assert.deepEqual((await evaluate('window.agent0.skillsList()')).loaded, ['desktop-check']);
+  await evaluate(`document.getElementById('skills-button').click()`);
+  await waitFor(`document.getElementById('skills-dialog').open && document.getElementById('skills-list').textContent.includes('已加载') && !document.getElementById('skills-refresh').disabled`);
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  await writeFile(join(profile, 'skills.png'), (await window.webContents.capturePage()).toPNG());
+  await evaluate(`document.getElementById('close-skills').click()`);
+
   assert.ok(await evaluate('document.getElementById(\'task\').textContent.includes(\'Desktop verification\')'));
   assert.ok(await evaluate('document.getElementById(\'activity\').textContent.includes(\'set_plan\')'));
   await evaluate('window.agent0.remember(\'Prefer concise answers\')');
@@ -267,6 +300,7 @@ try {
   const after = await evaluate('window.agent0.state()');
   assert.equal(after.history.length, 0);
   assert.equal(after.task, null);
+  assert.deepEqual((await evaluate('window.agent0.skillsList()')).loaded, []);
   assert.ok(after.memory.includes('Prefer concise answers'));
   await evaluate('document.getElementById(\'mcp-button\').click()');
   await waitFor('document.getElementById(\'mcp-id\').value === \'smoke\' && !document.getElementById(\'mcp-save\').disabled');
@@ -317,7 +351,7 @@ try {
   await waitFor('!document.getElementById(\'jev-settings\').open');
   assert.equal((await evaluate('window.agent0.state()')).config.jev.enabled, false);
   assert.equal(errors.length, 0, errors.join('\n'));
-  console.log(`PASS: setup, chat, MCP settings, external tool calls, task plan, memory, language switching, persistence, reload, reset, Jev settings and routing. Screenshots: ${profile}`);
+  console.log(`PASS: setup, chat, MCP settings, external tool calls, task plan, memory, language switching, persistence, reload, reset, skills discovery and loading, Jev settings and routing. Screenshots: ${profile}`);
   clearTimeout(deadline);
   server.close();
   await remoteFixture.close();

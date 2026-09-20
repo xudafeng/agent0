@@ -100,9 +100,14 @@ pnpm cli
 | `/memory` | Show persistent memory. |
 | `/remember <text>` | Save a memory. |
 | `/task` | Show the current task plan. |
+| `/skills` | List discovered local skills and loading errors. |
 | `exit` | Quit. |
 
 See [configuration](docs/configuration.md) for provider settings.
+
+## Skills
+
+The desktop and CLI runtimes discover local `SKILL.md` workflows from `~/.agents/skills` and `.agents/skills` in the configuration directory. Mention a skill as `$skill-name`, or describe a task matching its description. The model can load its instructions and supporting text files on demand. See [skill configuration](docs/configuration.md#skills) for installation, custom directories, and current limits.
 
 ## Development
 

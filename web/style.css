@@ -1079,3 +1079,11 @@ dialog select {
   font-size: 10px;
   color: #69766f;
 }
+
+/* Skill catalog */
+#skills-dialog { width: min(640px, 90vw); }
+#skills-dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+#skills-refresh { margin-top: 16px; }
+.skill-card { border: 1px solid #e0e5e1; border-radius: 12px; padding: 16px; margin-top: 12px; }
+.skill-card h3 { margin: 0 0 6px; font-size: 16px; }
+.skill-card code { display: block; overflow-wrap: anywhere; font-size: 11px; color: #69766f; margin-bottom: 12px; }
