@@ -8,7 +8,7 @@ A desktop AI agent with **Jev-powered tool routing**, MCP integration, task plan
 
 [Set up Jev](docs/configuration.md#jev-routing) · [Download desktop builds](https://github.com/xudafeng/agent0/actions/workflows/build-electron.yml)
 
-![agent0 desktop app featuring Jev tool routing, its setup shortcut, and the agent workspace](docs/images/agent0-desktop.png)
+![agent0 desktop app featuring Jev tool routing, its setup shortcut, and the agent workspace](docs/images/agent0-jev-demo.gif)
 
 ## Download the desktop app
 
@@ -22,8 +22,8 @@ Prebuilt downloads include Electron; you do not need Node.js or pnpm to run the 
 
 | Your computer | Artifact name | File inside |
 | --- | --- | --- |
-| macOS, Apple Silicon (M-series) | `agent0-mac-arm64-<commit>` | `agent0-<version>-mac-arm64.zip` |
-| macOS, Intel | `agent0-mac-x64-<commit>` | `agent0-<version>-mac-x64.zip` |
+| macOS, Apple Silicon (M-series) | `agent0-mac-arm64-<commit>` | `agent0-<version>-mac-arm64.dmg` |
+| macOS, Intel | `agent0-mac-x64-<commit>` | `agent0-<version>-mac-x64.dmg` |
 | Windows, x64 | `agent0-win-x64-<commit>` | `agent0-<version>-win-x64.exe` |
 | Linux, x64 | `agent0-linux-x64-<commit>` | `agent0-<version>-linux-x64.AppImage` |
 
@@ -33,7 +33,7 @@ Prebuilt downloads include Electron; you do not need Node.js or pnpm to run the 
 
 Extract the downloaded GitHub artifact ZIP first, then follow the steps for your platform:
 
-- **macOS:** Extract the application ZIP inside the artifact, move `agent0.app` to **Applications**, and open it.
+- **macOS:** Open the DMG inside the artifact, drag `agent0.app` to **Applications**, and open it.
 - **Windows:** Run the `.exe` installer and follow the installation prompts, then launch **agent0** from the Start menu.
 - **Linux:** Give the `.AppImage` file execute permission in your file manager, then open it. Alternatively, run `chmod +x agent0-<version>-linux-x64.AppImage` and `./agent0-<version>-linux-x64.AppImage`, replacing `<version>` with the downloaded version.
 
@@ -79,13 +79,24 @@ The packaged app stores settings in `~/Library/Application Support/agent0/.env`,
 
 The application icon lives in `desktop/assets`. After editing `icon.svg`, run `pnpm build:icons` on macOS to regenerate the PNG and ICNS assets, then run `pnpm package` to rebuild the app.
 
+## Record the Jev demo
+
+The README GIF records the real desktop UI with simulated local model and Jev APIs; it does not use real API keys. On macOS, install `ffmpeg`, then run:
+
+```bash
+pnpm build
+pnpm exec electron scripts/record-jev-demo.mjs
+```
+
+The recording uses an isolated temporary profile and writes `docs/images/agent0-jev-demo.gif`.
+
 ## GitHub Actions builds
 
 The [**Build Electron app** workflow](.github/workflows/build-electron.yml) runs on branch pushes, `v*` tags, pull requests, and manual dispatch. It uses the pinned pnpm version and resolves dependencies from `package.json` with `pnpm install --no-frozen-lockfile`, then runs typechecking and unit tests before packaging. Lockfiles are ignored, so resolved dependency versions can change between builds.
 
 See [Download the desktop app](#download-the-desktop-app) for artifact names and installation steps. Artifacts are retained for 14 days. No signing secrets or model API keys are needed in CI; users configure their own API keys in the app.
 
-Both macOS builds verify the signature of the app extracted from the final ZIP. The Apple Silicon build also runs the desktop integration smoke test and launches that extracted app with an isolated temporary profile to check the packaged dependencies, preload, renderer, and skill discovery. Intel macOS is cross-packaged on the same Apple Silicon runner; Windows, Linux, and Intel application launch behavior still needs testing on those systems.
+Both macOS builds mount the final DMG and verify the application signature. The Apple Silicon build also runs the desktop integration smoke test and launches the mounted app with an isolated temporary profile to check the packaged dependencies, preload, renderer, and skill discovery. Intel macOS is cross-packaged on the same Apple Silicon runner; Windows, Linux, and Intel application launch behavior still needs testing on those systems.
 
 ## Command line
 

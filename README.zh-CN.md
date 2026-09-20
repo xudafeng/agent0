@@ -8,7 +8,7 @@
 
 [配置 Jev](docs/configuration.md#jev-routing) · [下载桌面应用](https://github.com/xudafeng/agent0/actions/workflows/build-electron.yml)
 
-![agent0 桌面应用，展示 Jev 智能工具路由、设置入口和智能助手工作区](docs/images/agent0-desktop.png)
+![agent0 桌面应用，展示 Jev 智能工具路由、设置入口和智能助手工作区](docs/images/agent0-jev-demo.gif)
 
 ## 桌面应用
 

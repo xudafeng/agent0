@@ -46,14 +46,14 @@ jobs:
           - platform: mac
             runner: macos-15
             arch: arm64
-            target: zip
-            extension: zip
+            target: dmg
+            extension: dmg
           # Cross-package Intel on Apple Silicon; pnpm 11 has no Intel macOS binary.
           - platform: mac
             runner: macos-15
             arch: x64
-            target: zip
-            extension: zip
+            target: dmg
+            extension: dmg
           - platform: win
             runner: windows-2025
             arch: x64
@@ -85,15 +85,17 @@ jobs:
         run: pnpm build
       - name: Package application
         run: pnpm exec electron-builder --${{ matrix.platform }} ${{ matrix.target }} --${{ matrix.arch }} --publish never
-      - name: Verify archived macOS application
+      - name: Verify macOS disk image
         if: matrix.platform == 'mac'
         shell: bash
         run: |
-          ditto -x -k release/*-mac-${{ matrix.arch }}.zip "release/verified-archive"
-          codesign --verify --deep --strict --verbose=2 "release/verified-archive/agent0.app"
-      - name: Launch packaged application
-        if: matrix.platform == 'mac' && matrix.arch == 'arm64'
-        run: pnpm exec node scripts/test-packaged.mjs "release/verified-archive/agent0.app/Contents/MacOS/agent0"
+          mkdir -p release/verified-image
+          hdiutil attach release/*-mac-${{ matrix.arch }}.dmg -readonly -nobrowse -mountpoint "$PWD/release/verified-image"
+          trap 'hdiutil detach "$PWD/release/verified-image"' EXIT
+          codesign --verify --deep --strict --verbose=2 release/verified-image/agent0.app
+          if [ '${{ matrix.arch }}' = 'arm64' ]; then
+            pnpm exec node scripts/test-packaged.mjs "$PWD/release/verified-image/agent0.app/Contents/MacOS/agent0"
+          fi
       - name: Upload application
         uses: actions/upload-artifact@v7
         with:
