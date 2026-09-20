@@ -85,6 +85,15 @@ jobs:
         run: pnpm build
       - name: Package application
         run: pnpm exec electron-builder --${{ matrix.platform }} ${{ matrix.target }} --${{ matrix.arch }} --publish never
+      - name: Verify archived macOS application
+        if: matrix.platform == 'mac'
+        shell: bash
+        run: |
+          ditto -x -k release/*-mac-${{ matrix.arch }}.zip "release/verified-archive"
+          codesign --verify --deep --strict --verbose=2 "release/verified-archive/agent0.app"
+      - name: Launch packaged application
+        if: matrix.platform == 'mac' && matrix.arch == 'arm64'
+        run: pnpm exec node scripts/test-packaged.mjs "release/verified-archive/agent0.app/Contents/MacOS/agent0"
       - name: Upload application
         uses: actions/upload-artifact@v7
         with:

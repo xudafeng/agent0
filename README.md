@@ -37,7 +37,7 @@ Extract the downloaded GitHub artifact ZIP first, then follow the steps for your
 - **Windows:** Run the `.exe` installer and follow the installation prompts, then launch **agent0** from the Start menu.
 - **Linux:** Give the `.AppImage` file execute permission in your file manager, then open it. Alternatively, run `chmod +x agent0-<version>-linux-x64.AppImage` and `./agent0-<version>-linux-x64.AppImage`, replacing `<version>` with the downloaded version.
 
-These builds are unsigned, and macOS builds are not notarized. Your operating system may show a security prompt or block the initial launch.
+macOS builds use ad-hoc signatures for bundle integrity, but are not Developer ID signed or notarized. Windows builds are unsigned. Your operating system may block the initial launch. On macOS, after attempting to open the app, use **System Settings → Privacy & Security → Open Anyway** if you trust this build. Ad-hoc signing does not bypass Gatekeeper.
 
 On first launch, open **Model settings**, choose Kimi or OpenAI, and enter your model ID and API key. Jev routing is optional and uses a separate TypeSafe API key.
 
@@ -73,7 +73,7 @@ Model responses appear when each agent run finishes; tool activity updates durin
 pnpm package
 ```
 
-Open `release/mac-arm64/agent0.app` on Apple Silicon (or `release/mac/agent0.app` on Intel). You can copy the app into Applications. This local build is unsigned and is not notarized for distribution.
+Open `release/mac-arm64/agent0.app` on Apple Silicon (or `release/mac/agent0.app` on Intel). You can copy the app into Applications. This local build uses an ad-hoc signature and is not notarized for distribution.
 
 The packaged app stores settings in `~/Library/Application Support/agent0/.env`, with memory and traces in its `data` directory. Development uses the project's `.env` and `data` directory. API keys are stored locally in plaintext and are never bundled into the app. Requests go to the configured model provider.
 
@@ -85,7 +85,7 @@ The [**Build Electron app** workflow](.github/workflows/build-electron.yml) runs
 
 See [Download the desktop app](#download-the-desktop-app) for artifact names and installation steps. Artifacts are retained for 14 days. No signing secrets or model API keys are needed in CI; users configure their own API keys in the app.
 
-The Apple Silicon build also runs the desktop integration smoke test. Intel macOS is cross-packaged on the same Apple Silicon runner; Windows, Linux, and Intel application launch behavior still needs testing on those systems.
+Both macOS builds verify the signature of the app extracted from the final ZIP. The Apple Silicon build also runs the desktop integration smoke test and launches that extracted app with an isolated temporary profile to check the packaged dependencies, preload, renderer, and skill discovery. Intel macOS is cross-packaged on the same Apple Silicon runner; Windows, Linux, and Intel application launch behavior still needs testing on those systems.
 
 ## Command line
 

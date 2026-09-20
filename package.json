@@ -58,7 +58,8 @@
     "mac": {
       "icon": "desktop/assets/icon.icns",
       "category": "public.app-category.productivity",
-      "identity": null
+      "identity": "-",
+      "hardenedRuntime": false
     }
   }
 }

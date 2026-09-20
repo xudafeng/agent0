@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron';
 import { fileURLToPath } from 'node:url';
-import { mkdir, readFile, writeFile, rename, realpath } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile, rename, realpath } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import dotenv from 'dotenv';
 import { createAgentRuntime } from '../dist/runtime.js';
@@ -19,6 +20,7 @@ let history = [];
 let events = [];
 let configPath;
 let savedMemory = '';
+const smokeTest = process.argv.includes('--agent0-smoke-test');
 
 function configuration() {
   const provider = process.env.LLM_PROVIDER || 'kimi';
@@ -185,7 +187,14 @@ handle('configure', async (input) => {
 
 app.whenReady().then(async () => {
   if (process.platform === 'darwin') app.dock.setIcon(icon);
-  const dataDirectory = app.isPackaged ? app.getPath('userData') : process.env.AGENT0_PROFILE_DIR || root;
+  const smokeDirectory = smokeTest ? await mkdtemp(path.join(tmpdir(), 'agent0-packaged-')) : undefined;
+  if (smokeDirectory) app.setPath('userData', smokeDirectory);
+  const dataDirectory = smokeDirectory || (app.isPackaged ? app.getPath('userData') : process.env.AGENT0_PROFILE_DIR || root);
+  if (smokeTest) {
+    process.env.AGENT0_SKILL_DIRS = '[]';
+    process.env.MOONSHOT_API_KEY = '';
+    process.env.OPENAI_API_KEY = '';
+  }
   await mkdir(dataDirectory, { recursive: true });
   process.chdir(dataDirectory);
   configPath = path.join(dataDirectory, '.env');
@@ -204,7 +213,23 @@ app.whenReady().then(async () => {
     });
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     window.webContents.on('will-navigate', (event) => event.preventDefault());
-    window.loadFile(path.join(root, 'web/index.html'));
+    const loaded = window.loadFile(path.join(root, 'web/index.html'));
+    if (smokeTest) void loaded.then(async () => {
+      const ready = await window.webContents.executeJavaScript(`(async () => {
+        const state = await window.agent0.state();
+        const catalog = await window.agent0.skillsList();
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if (document.getElementById('settings').open && document.getElementById('skills-button').onclick) {
+            return state.history.length === 0 && catalog.skills.length === 0 && document.getElementById('error').hidden;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        return false;
+      })()`);
+      if (!ready) throw new Error('Packaged renderer failed its startup check.');
+      console.log('PASS: packaged application, preload, renderer, and skill discovery.');
+      app.exit(0);
+    }).catch((error) => { console.error(error); app.exit(1); });
   }
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
