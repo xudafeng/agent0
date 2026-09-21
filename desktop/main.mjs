@@ -139,7 +139,7 @@ handle('send', async (prompt) => {
   try {
     const result = await agent.run(value, (event) => {
       events.push(event);
-      publish('trace', event);
+      publish('agent', event);
       publish('state', state());
     });
     history.push({ role: 'assistant', content: result.text, steps: result.steps });
