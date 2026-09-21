@@ -1,4 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import { buildContext } from './context.js';
+import type { AgentEvent, AgentEventHandler } from './events.js';
 import { createJevRouter } from './jev.js';
 import { loadMemory, remember as persistMemory } from './memory.js';
 import { connectMcpServers } from './mcp.js';
@@ -6,7 +8,7 @@ import { getProvider, type Message } from './provider.js';
 import { createSkillRuntime, type SkillSummary } from './skills.js';
 import { createSubagentRuntime } from './subagent.js';
 import { createTaskRuntime, formatTaskState, type TaskState } from './task.js';
-import { createTraceRecorder, type TraceEvent } from './trace.js';
+import { createTraceRecorder } from './trace.js';
 import { executeTool, tools as localTools } from './tools.js';
 
 export interface RuntimeOptions {
@@ -21,7 +23,7 @@ export interface RunResult {
 }
 
 export interface AgentRuntime {
-  run(prompt: string, onEvent?: (event: TraceEvent) => void): Promise<RunResult>;
+  run(prompt: string, onEvent?: AgentEventHandler): Promise<RunResult>;
   remember(content: string): Promise<void>;
   getMemory(): string;
   getTaskState(): TaskState | undefined;
@@ -48,37 +50,51 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
         throw new Error('Prompt cannot be empty.');
       }
 
-      const trace = await createTraceRecorder(onEvent);
-      await trace.record('run_start', { prompt: value });
+      const runId = randomUUID();
+      const trace = await createTraceRecorder();
+      const emit = async (event: AgentEvent) => {
+        await trace.record(event);
+        await onEvent?.(event);
+      };
+      const base = () => ({ runId, timestamp: new Date().toISOString() });
+
+      await emit({ ...base(), type: 'run_start', prompt: value });
       messages.push({ role: 'user', content: value });
 
       try {
         for (let step = 1; step <= maxSteps; step += 1) {
+          await emit({ ...base(), type: 'turn_start', step });
+
           const context = buildContext(memory, messages, taskRuntime.getState(), skills.context());
           const routed = await route?.(context, tools);
-          if (routed) await trace.record('jev_decision', { ...routed.decision }, step);
+          if (routed) {
+            await emit({ ...base(), type: 'jev_decision', step, decision: { ...routed.decision } });
+          }
+
           const availableTools = routed?.tools ?? tools;
           const result = await provider.generate(context, availableTools);
           const { text, toolCall, ...metadata } = result;
 
-          await trace.record(
-            'model_result',
-            {
-              metadata,
-              contextMessages: context.length,
-              toolCall: toolCall && { name: toolCall.name, arguments: toolCall.arguments },
-              hasText: Boolean(text),
-            },
+          await emit({
+            ...base(),
+            type: 'model_result',
             step,
-          );
+            metadata,
+            contextMessages: context.length,
+            ...(toolCall ? { toolCall: { name: toolCall.name, arguments: toolCall.arguments } } : {}),
+            hasText: Boolean(text),
+          });
 
           if (toolCall) {
             messages.push({ role: 'assistant', toolCall });
-            await trace.record('tool_call', { name: toolCall.name, arguments: toolCall.arguments }, step);
+            await emit({ ...base(), type: 'tool_start', step, toolCall });
 
             let toolContent: string;
+            let isError = false;
             try {
-              if (!availableTools.some((tool) => tool.name === toolCall.name)) throw new Error('Tool is not available for this step.');
+              if (!availableTools.some((tool) => tool.name === toolCall.name)) {
+                throw new Error('Tool is not available for this step.');
+              }
               const toolResult = skills.hasTool(toolCall.name)
                 ? await skills.callTool(toolCall)
                 : taskRuntime.hasTool(toolCall.name)
@@ -90,6 +106,7 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
                       : executeTool(toolCall);
               toolContent = JSON.stringify({ ok: true, result: toolResult });
             } catch (error) {
+              isError = true;
               toolContent = JSON.stringify({
                 ok: false,
                 error: error instanceof Error ? error.message : String(error),
@@ -97,14 +114,24 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
             }
 
             messages.push({ role: 'tool', toolCallId: toolCall.id, content: toolContent });
-            await trace.record('tool_result', { name: toolCall.name, content: toolContent }, step);
+            await emit({
+              ...base(),
+              type: 'tool_end',
+              step,
+              toolCallId: toolCall.id,
+              name: toolCall.name,
+              result: toolContent,
+              isError,
+            });
+            await emit({ ...base(), type: 'turn_end', step });
             continue;
           }
 
           if (text) {
             messages.push({ role: 'assistant', content: text });
-            await trace.record('final_answer', { text }, step);
-            return { runId: trace.runId, text, steps: step };
+            await emit({ ...base(), type: 'turn_end', step });
+            await emit({ ...base(), type: 'run_end', text, steps: step });
+            return { runId, text, steps: step };
           }
 
           throw new Error('Provider returned neither text nor a tool call.');
@@ -112,7 +139,9 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
 
         throw new Error(`Agent run exceeded max steps: ${maxSteps}`);
       } catch (error) {
-        await trace.record('run_error', {
+        await emit({
+          ...base(),
+          type: 'run_error',
           error: error instanceof Error ? error.message : String(error),
         });
         throw error;
