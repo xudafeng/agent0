@@ -74,15 +74,15 @@ function render(state) {
   const memoryContent = memory.replace(/^# Memory\s*/, '').trim();
   $('memory').textContent = memoryContent || t('Save useful context for future conversations.');
   $('memory').classList.toggle('empty-panel', !memoryContent);
-  const activity = events.filter((event) => ['jev_decision', 'tool_call', 'tool_result', 'run_error', 'final_answer'].includes(event.type));
+  const activity = events.filter((event) => ['jev_decision', 'tool_start', 'tool_end', 'run_error', 'run_end'].includes(event.type));
   $('activity-count').textContent = activity.length;
   // Avoid rebuilding activity details when only unrelated state changes.
   if ($('activity').dataset.snapshot !== JSON.stringify(activity)) {
     $('activity').dataset.snapshot = JSON.stringify(activity);
     $('activity').replaceChildren(...activity.map((event) => {
       const details = element('details', '');
-      const label = event.type === 'jev_decision' ? jevActivityLabel(event.data) : event.type === 'tool_call' ? `↗ ${event.data.name}` : event.type === 'tool_result' ? `✓ ${t('{name} returned', { name: event.data.name })}` : event.type === 'run_error' ? t('Run failed') : t('Response ready');
-      details.append(element('summary', '', label), element('pre', '', JSON.stringify(event.data, null, 2)));
+      const label = event.type === 'jev_decision' ? jevActivityLabel(event.decision) : event.type === 'tool_start' ? `↗ ${event.toolCall.name}` : event.type === 'tool_end' ? `${event.isError ? '!' : '✓'} ${t('{name} returned', { name: event.name })}` : event.type === 'run_error' ? t('Run failed') : t('Response ready');
+      details.append(element('summary', '', label), element('pre', '', JSON.stringify(event, null, 2)));
       return details;
     }));
     if (!activity.length) $('activity').textContent = t('Tool calls and progress, as they happen.');
@@ -103,9 +103,9 @@ function settings() {
 }
 
 function renderProgress() {
-  $('progress-label').textContent = progressEvent?.type === 'tool_call'
-    ? t('Using {name}…', { name: progressEvent.data.name })
-    : progressEvent?.type === 'tool_result' ? t('Thinking about the result…') : t('Thinking…');
+  $('progress-label').textContent = progressEvent?.type === 'tool_start'
+    ? t('Using {name}…', { name: progressEvent.toolCall.name })
+    : progressEvent?.type === 'tool_end' ? t('Thinking about the result…') : t('Thinking…');
 }
 
 for (const select of document.querySelectorAll('[data-language]')) select.onchange = () => {
@@ -181,6 +181,6 @@ $('memory-form').onsubmit = async (event) => {
 };
 api.onEvent(({ type, data }) => {
   if (type === 'state') render(data);
-  if (type === 'trace') { progressEvent = data; renderProgress(); }
+  if (type === 'agent') { progressEvent = data; renderProgress(); }
 });
 try { render(await api.state()); if (!current.config.configured) settings(); } catch (error) { showError(error); }
