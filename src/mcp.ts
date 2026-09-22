@@ -9,7 +9,7 @@ import type { ToolCall, ToolDefinition } from './tools.js';
 export interface McpRuntime {
   tools: ToolDefinition[];
   hasTool(name: string): boolean;
-  callTool(toolCall: ToolCall): Promise<unknown>;
+  callTool(toolCall: ToolCall, signal?: AbortSignal): Promise<unknown>;
   close(): Promise<void>;
 }
 
@@ -72,10 +72,11 @@ async function connectTransport(transport: Transport, serverId?: string): Promis
     return {
       tools,
       hasTool: (name) => names.has(name),
-      async callTool(toolCall) {
+      async callTool(toolCall, signal) {
+        signal?.throwIfAborted();
         const name = names.get(toolCall.name);
         if (!name) throw new Error('Unknown MCP tool.');
-        const result = await client.callTool({ name, arguments: toolCall.arguments }, { timeout: 60000 });
+        const result = await client.callTool({ name, arguments: toolCall.arguments }, { timeout: 60000, signal });
         if (result.isError) throw new Error(resultText(result.content));
         return result.content;
       },
@@ -198,10 +199,11 @@ export async function connectMcpServers(servers = loadMcpServers()): Promise<Mcp
   return {
     tools: clients.flatMap((client) => client.tools),
     hasTool: (name) => owners.has(name),
-    async callTool(toolCall) {
+    async callTool(toolCall, signal) {
+      signal?.throwIfAborted();
       const owner = owners.get(toolCall.name);
       if (!owner) throw new Error('Unknown MCP tool.');
-      return owner.callTool(toolCall);
+      return owner.callTool(toolCall, signal);
     },
     close,
   };

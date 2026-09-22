@@ -40,6 +40,8 @@ function render(state) {
   $('connection-label').textContent = busy ? t('Working') : config.configured ? t('Ready') : t('Setup needed');
   $('model-label').textContent = config.model || t('Connect a model to get started');
   $('send').disabled = locked || !$('prompt').value.trim();
+  $('stop').hidden = !busy;
+  $('stop').disabled = !busy;
   $('new-chat').disabled = locked;
   $('settings-button').disabled = locked;
   $('memory-input').disabled = locked;
@@ -74,14 +76,14 @@ function render(state) {
   const memoryContent = memory.replace(/^# Memory\s*/, '').trim();
   $('memory').textContent = memoryContent || t('Save useful context for future conversations.');
   $('memory').classList.toggle('empty-panel', !memoryContent);
-  const activity = events.filter((event) => ['jev_decision', 'tool_start', 'tool_end', 'run_error', 'run_end'].includes(event.type));
+  const activity = events.filter((event) => ['jev_decision', 'tool_start', 'tool_end', 'run_cancelled', 'run_error', 'run_end'].includes(event.type));
   $('activity-count').textContent = activity.length;
   // Avoid rebuilding activity details when only unrelated state changes.
   if ($('activity').dataset.snapshot !== JSON.stringify(activity)) {
     $('activity').dataset.snapshot = JSON.stringify(activity);
     $('activity').replaceChildren(...activity.map((event) => {
       const details = element('details', '');
-      const label = event.type === 'jev_decision' ? jevActivityLabel(event.decision) : event.type === 'tool_start' ? `↗ ${event.toolCall.name}` : event.type === 'tool_end' ? `${event.isError ? '!' : '✓'} ${t('{name} returned', { name: event.name })}` : event.type === 'run_error' ? t('Run failed') : t('Response ready');
+      const label = event.type === 'jev_decision' ? jevActivityLabel(event.decision) : event.type === 'tool_start' ? `↗ ${event.toolCall.name}` : event.type === 'tool_end' ? `${event.isError ? '!' : '✓'} ${t('{name} returned', { name: event.name })}` : event.type === 'run_cancelled' ? t('Run stopped') : event.type === 'run_error' ? t('Run failed') : t('Response ready');
       details.append(element('summary', '', label), element('pre', '', JSON.stringify(event, null, 2)));
       return details;
     }));
@@ -120,6 +122,10 @@ for (const select of document.querySelectorAll('[data-language]')) select.onchan
   }
 };
 
+$('stop').onclick = async () => {
+  $('stop').disabled = true;
+  try { await api.abort(); } catch (error) { showError(error); }
+};
 $('settings-button').onclick = settings;
 $('close-settings').onclick = () => $('settings').close();
 $('provider').onchange = () => {

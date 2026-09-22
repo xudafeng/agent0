@@ -4,7 +4,7 @@ import type { ToolCall, ToolDefinition } from './tools.js';
 export interface SubagentRuntime {
   tools: ToolDefinition[];
   hasTool(name: string): boolean;
-  callTool(toolCall: ToolCall): Promise<unknown>;
+  callTool(toolCall: ToolCall, signal?: AbortSignal): Promise<unknown>;
 }
 
 export function createSubagentRuntime(provider: Provider): SubagentRuntime {
@@ -31,7 +31,7 @@ export function createSubagentRuntime(provider: Provider): SubagentRuntime {
     hasTool(name) {
       return name === 'delegate_task';
     },
-    async callTool(toolCall) {
+    async callTool(toolCall, signal) {
       if (toolCall.name !== 'delegate_task') {
         throw new Error(`Unknown subagent tool: ${toolCall.name}`);
       }
@@ -41,13 +41,14 @@ export function createSubagentRuntime(provider: Provider): SubagentRuntime {
         throw new Error('task must be a non-empty string.');
       }
 
+      signal?.throwIfAborted();
       const result = await provider.generate([
         {
           role: 'system',
           content: 'You are a focused subagent. Complete only the delegated subtask. Return a concise result that the parent agent can use.',
         },
         { role: 'user', content: task.trim() },
-      ]);
+      ], undefined, signal);
 
       if (!result.text) {
         throw new Error('Subagent returned no text result.');

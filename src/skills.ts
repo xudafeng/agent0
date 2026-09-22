@@ -117,7 +117,8 @@ export async function createSkillRuntime(directories = skillDirectories()) {
         ...[...active].map(([name, body]) => `Loaded skill ${name}:\n${body}`),
       ].join('\n\n');
     },
-    async callTool(call: ToolCall): Promise<unknown> {
+    async callTool(call: ToolCall, signal?: AbortSignal): Promise<unknown> {
+      signal?.throwIfAborted();
       if (!this.hasTool(call.name)) throw new Error(`Unknown skill tool: ${call.name}`);
       const { name, path } = call.arguments;
       const skill = typeof name === 'string' ? catalog.get(name) : undefined;
@@ -125,12 +126,15 @@ export async function createSkillRuntime(directories = skillDirectories()) {
       if (call.name === 'load_skill') {
         const parsed = parseSkill(await readFileWithin(dirname(skill.path), skill.path));
         if (parsed.name !== skill.name) throw new Error('Skill name changed. Start a new conversation to refresh the catalog.');
+        signal?.throwIfAborted();
         active.set(skill.name, parsed.body);
         return { ...skill, instructions: parsed.body };
       }
       if (!active.has(skill.name)) throw new Error('Load the skill before reading its supporting files.');
       if (typeof path !== 'string' || !path.trim() || isAbsolute(path)) throw new Error('path must be a non-empty relative path.');
-      return { name, path, content: await readFileWithin(dirname(skill.path), resolve(dirname(skill.path), path)) };
+      const content = await readFileWithin(dirname(skill.path), resolve(dirname(skill.path), path));
+      signal?.throwIfAborted();
+      return { name, path, content };
     },
   };
 }
