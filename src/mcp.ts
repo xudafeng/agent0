@@ -76,7 +76,10 @@ async function connectTransport(transport: Transport, serverId?: string): Promis
         signal?.throwIfAborted();
         const name = names.get(toolCall.name);
         if (!name) throw new Error('Unknown MCP tool.');
-        const result = await client.callTool({ name, arguments: toolCall.arguments }, { timeout: 60000, signal });
+        const result = await client.callTool(
+          { name, arguments: toolCall.arguments },
+          { timeout: 60000, ...(signal ? { signal } : {}) },
+        );
         if (result.isError) throw new Error(resultText(result.content));
         return result.content;
       },
