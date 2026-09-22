@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createToolRegistry, type AgentTool } from '../src/tools.js';
+import { createToolRegistry, ToolExecutionDeniedError, type AgentTool } from '../src/tools.js';
 
 const tool = (name: string, execute: AgentTool['execute']): AgentTool => ({
   definition: {
@@ -59,4 +59,37 @@ test('tool registry exposes execution mode with parallel default', () => {
   assert.equal(registry.executionMode('parallel-tool'), 'parallel');
   assert.equal(registry.executionMode('sequential-tool'), 'sequential');
   assert.equal(registry.executionMode('missing'), 'parallel');
+});
+
+
+test('tool registry denies execution through policy before calling the tool', async () => {
+  let executed = false;
+  const registry = createToolRegistry(
+    [tool('write', () => {
+      executed = true;
+      return 'written';
+    })],
+    (toolCall) => toolCall.name === 'write'
+      ? { action: 'deny', reason: 'write requires approval' }
+      : { action: 'allow' },
+  );
+
+  await assert.rejects(
+    registry.execute({ id: '1', name: 'write', arguments: {} }),
+    (error: unknown) => {
+      assert.ok(error instanceof ToolExecutionDeniedError);
+      assert.equal(error.reason, 'write requires approval');
+      return true;
+    },
+  );
+  assert.equal(executed, false);
+});
+
+test('tool registry supports asynchronous allow policies', async () => {
+  const registry = createToolRegistry(
+    [tool('read', () => 'content')],
+    async () => ({ action: 'allow' }),
+  );
+
+  assert.equal(await registry.execute({ id: '1', name: 'read', arguments: {} }), 'content');
 });

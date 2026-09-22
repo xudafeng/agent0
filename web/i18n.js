@@ -156,6 +156,7 @@ const chinese = {
   'A little structure goes a long way. Your task plan will appear here.': '清晰的步骤，让行动更有方向。任务计划会显示在这里。',
   'Tool calls and progress, as they happen.': '实时展示工具调用与进度。',
   '{name} returned': '{name} 已返回结果',
+  '{name} blocked': '{name} 已被阻止',
   'Run failed': '运行失败',
   'Run stopped': '运行已停止',
   'Response ready': '回复已就绪',

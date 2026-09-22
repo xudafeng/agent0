@@ -14,6 +14,15 @@ export interface ToolExecutionContext {
   signal?: AbortSignal;
 }
 
+export type ToolPolicyDecision =
+  | { action: 'allow' }
+  | { action: 'deny'; reason: string };
+
+export type ToolExecutionPolicy = (
+  toolCall: ToolCall,
+  context: ToolExecutionContext,
+) => Promise<ToolPolicyDecision> | ToolPolicyDecision;
+
 export interface AgentTool {
   definition: ToolDefinition;
   executionMode?: 'parallel' | 'sequential';
@@ -30,6 +39,16 @@ export function adaptToolDefinitions(
   return definitions.map((definition) => ({ definition, executionMode, execute }));
 }
 
+export class ToolExecutionDeniedError extends Error {
+  constructor(
+    public readonly toolCall: ToolCall,
+    public readonly reason: string,
+  ) {
+    super(`Tool execution denied: ${reason}`);
+    this.name = 'ToolExecutionDeniedError';
+  }
+}
+
 export interface ToolRegistry {
   definitions: ToolDefinition[];
   has(name: string): boolean;
@@ -37,7 +56,7 @@ export interface ToolRegistry {
   execute(toolCall: ToolCall, context?: ToolExecutionContext): Promise<unknown>;
 }
 
-export function createToolRegistry(agentTools: AgentTool[]): ToolRegistry {
+export function createToolRegistry(agentTools: AgentTool[], policy?: ToolExecutionPolicy): ToolRegistry {
   const registry = new Map<string, AgentTool>();
 
   for (const tool of agentTools) {
@@ -62,6 +81,11 @@ export function createToolRegistry(agentTools: AgentTool[]): ToolRegistry {
       if (!tool) {
         throw new Error(`Unknown tool: ${toolCall.name}`);
       }
+      const decision = await policy?.(toolCall, context) ?? { action: 'allow' };
+      if (decision.action === 'deny') {
+        throw new ToolExecutionDeniedError(toolCall, decision.reason);
+      }
+      context.signal?.throwIfAborted();
       return tool.execute(toolCall, context);
     },
   };
