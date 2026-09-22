@@ -16,6 +16,7 @@ const icon = path.join(root, 'desktop/assets/icon.png');
 let window;
 let runtime;
 let busy = false;
+let runController;
 let history = [];
 let events = [];
 let configPath;
@@ -67,6 +68,13 @@ function handle(name, action) {
     }
   });
 }
+
+ipcMain.handle('agent:abort', (event) => {
+  if (event.sender !== window?.webContents || event.senderFrame !== window.webContents.mainFrame) throw new Error('Unknown sender.');
+  if (!runController) return false;
+  runController.abort(new Error('Stopped by user.'));
+  return true;
+});
 
 handle('state', state);
 handle('skills-list', async () => {
@@ -136,16 +144,25 @@ handle('send', async (prompt) => {
   history.push({ role: 'user', content: value });
   events = [];
   publish('state', state());
+  const controller = new AbortController();
+  runController = controller;
   try {
-    const result = await agent.run(value, (event) => {
-      events.push(event);
-      publish('agent', event);
-      publish('state', state());
+    const result = await agent.run(value, {
+      signal: controller.signal,
+      onEvent: (event) => {
+        events.push(event);
+        publish('agent', event);
+        publish('state', state());
+      },
     });
     history.push({ role: 'assistant', content: result.text, steps: result.steps });
   } catch (error) {
-    history.push({ role: 'error', content: error instanceof Error ? error.message : String(error) });
-    throw error;
+    if (!controller.signal.aborted) {
+      history.push({ role: 'error', content: error instanceof Error ? error.message : String(error) });
+      throw error;
+    }
+  } finally {
+    if (runController === controller) runController = undefined;
   }
 });
 handle('reset', async () => {

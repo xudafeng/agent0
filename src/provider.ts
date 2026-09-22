@@ -21,7 +21,7 @@ export interface GenerationResult {
 }
 
 export interface Provider {
-  generate(messages: Message[], tools?: ToolDefinition[]): Promise<GenerationResult>;
+  generate(messages: Message[], tools?: ToolDefinition[], signal?: AbortSignal): Promise<GenerationResult>;
 }
 
 function requiredEnv(name: string) {
@@ -102,7 +102,7 @@ export function getProvider(): Provider {
     const client = new OpenAI({ apiKey: requiredEnv('OPENAI_API_KEY') });
 
     return {
-      async generate(messages, tools = []) {
+      async generate(messages, tools = [], signal) {
         const response = await client.responses.create({
           model,
           input: toOpenAIInput(messages),
@@ -113,7 +113,7 @@ export function getProvider(): Provider {
             parameters: tool.parameters,
             strict: false,
           })),
-        });
+        }, { signal });
 
         const functionCall = response.output.find((item) => item.type === 'function_call');
 
@@ -146,7 +146,7 @@ export function getProvider(): Provider {
     });
 
     return {
-      async generate(messages, tools = []) {
+      async generate(messages, tools = [], signal) {
         const response = await client.chat.completions.create({
           model,
           messages: toChatMessages(messages),
@@ -158,7 +158,7 @@ export function getProvider(): Provider {
               parameters: tool.parameters,
             },
           })),
-        });
+        }, { signal });
 
         const message = response.choices[0]?.message;
         const functionCall = message?.tool_calls?.[0];

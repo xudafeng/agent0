@@ -84,3 +84,15 @@ test('configuration and payload limits skip network calls', async () => {
   assert.equal((await route(messages, Array(255).fill(tools[0]))).decision.reason, 'tool_limit');
   assert.equal((await route([{ role: 'user', content: 'a'.repeat(64001) }], tools)).decision.reason, 'context_limit');
 });
+
+
+test('caller cancellation is propagated instead of becoming a fallback', async () => {
+  const pending: typeof fetch = async (_url, options) => new Promise((_resolve, reject) => {
+    options?.signal?.addEventListener('abort', () => reject(options.signal!.reason), { once: true });
+  });
+  const controller = new AbortController();
+  const route = createJevRouter(env, pending)!;
+  const result = route(messages, tools, controller.signal);
+  controller.abort(new Error('stop'));
+  await assert.rejects(result, /stop/);
+});

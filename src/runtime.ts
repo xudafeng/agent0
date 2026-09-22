@@ -22,8 +22,13 @@ export interface RunResult {
   steps: number;
 }
 
+export interface RunOptions {
+  onEvent?: AgentEventHandler;
+  signal?: AbortSignal;
+}
+
 export interface AgentRuntime {
-  run(prompt: string, onEvent?: AgentEventHandler): Promise<RunResult>;
+  run(prompt: string, options?: RunOptions): Promise<RunResult>;
   remember(content: string): Promise<void>;
   getMemory(): string;
   getTaskState(): TaskState | undefined;
@@ -44,7 +49,9 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
   let memory = await loadMemory();
 
   return {
-    async run(prompt, onEvent) {
+    async run(prompt, options = {}) {
+      const { onEvent, signal } = options;
+      signal?.throwIfAborted();
       const value = prompt.trim();
       if (!value) {
         throw new Error('Prompt cannot be empty.');
@@ -63,16 +70,17 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
 
       try {
         for (let step = 1; step <= maxSteps; step += 1) {
+          signal?.throwIfAborted();
           await emit({ ...base(), type: 'turn_start', step });
 
           const context = buildContext(memory, messages, taskRuntime.getState(), skills.context());
-          const routed = await route?.(context, tools);
+          const routed = await route?.(context, tools, signal);
           if (routed) {
             await emit({ ...base(), type: 'jev_decision', step, decision: { ...routed.decision } });
           }
 
           const availableTools = routed?.tools ?? tools;
-          const result = await provider.generate(context, availableTools);
+          const result = await provider.generate(context, availableTools, signal);
           const { text, toolCall, ...metadata } = result;
 
           await emit({
@@ -95,17 +103,19 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
               if (!availableTools.some((tool) => tool.name === toolCall.name)) {
                 throw new Error('Tool is not available for this step.');
               }
+              signal?.throwIfAborted();
               const toolResult = skills.hasTool(toolCall.name)
-                ? await skills.callTool(toolCall)
+                ? await skills.callTool(toolCall, signal)
                 : taskRuntime.hasTool(toolCall.name)
                   ? taskRuntime.callTool(toolCall)
                   : subagentRuntime.hasTool(toolCall.name)
-                    ? await subagentRuntime.callTool(toolCall)
+                    ? await subagentRuntime.callTool(toolCall, signal)
                     : mcp.hasTool(toolCall.name)
-                      ? await mcp.callTool(toolCall)
+                      ? await mcp.callTool(toolCall, signal)
                       : executeTool(toolCall);
               toolContent = JSON.stringify({ ok: true, result: toolResult });
             } catch (error) {
+              if (signal?.aborted) throw signal.reason ?? error;
               isError = true;
               toolContent = JSON.stringify({
                 ok: false,
@@ -139,6 +149,14 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
 
         throw new Error(`Agent run exceeded max steps: ${maxSteps}`);
       } catch (error) {
+        if (signal?.aborted) {
+          await emit({
+            ...base(),
+            type: 'run_cancelled',
+            ...(signal.reason === undefined ? {} : { reason: signal.reason instanceof Error ? signal.reason.message : String(signal.reason) }),
+          });
+          throw error;
+        }
         await emit({
           ...base(),
           type: 'run_error',

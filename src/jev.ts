@@ -37,7 +37,7 @@ export function createJevRouter(env = process.env, request: typeof fetch = fetch
   const endpoint = env.JEV_ENDPOINT || 'https://api.typesafe.ai/v1/systemone';
   const timeoutMs = Number(env.JEV_TIMEOUT_MS || '3000');
 
-  return async (messages: Message[], tools: ToolDefinition[]): Promise<{ tools: ToolDefinition[]; decision: JevDecision }> => {
+  return async (messages: Message[], tools: ToolDefinition[], signal?: AbortSignal): Promise<{ tools: ToolDefinition[]; decision: JevDecision }> => {
     const start = performance.now();
     const fallback = (reason: string, details = {}): { tools: ToolDefinition[]; decision: JevDecision } => ({
       tools, decision: { status: 'fallback', model: config.model, reason, ...details, durationMs: Math.round(performance.now() - start) },
@@ -53,8 +53,10 @@ export function createJevRouter(env = process.env, request: typeof fetch = fetch
     try {
       const url = new URL(endpoint);
       if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname))) return fallback('invalid_configuration');
+      const timeout = AbortSignal.timeout(timeoutMs);
+      const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
       const response = await request(url, {
-        method: 'POST', redirect: 'error', signal: AbortSignal.timeout(timeoutMs),
+        method: 'POST', redirect: 'error', signal: requestSignal,
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: config.model, state, questions: { route: {
           type: 'choice', criteria,
@@ -77,6 +79,7 @@ export function createJevRouter(env = process.env, request: typeof fetch = fetch
       const tool = tools[Number(answer.choice.slice(5))]!;
       return { tools: [tool], decision: { status: 'selected', selectedTool: tool.name, ...details, durationMs: Math.round(performance.now() - start) } };
     } catch (error) {
+      if (signal?.aborted) throw signal.reason ?? error;
       // Never include upstream bodies or exception messages, which may contain credentials.
       return fallback(error instanceof Error && ['TimeoutError', 'AbortError'].includes(error.name) ? 'timeout' : 'request_failed');
     }

@@ -28,6 +28,7 @@ export type AgentEvent =
     })
   | (AgentEventBase & { type: 'turn_end'; step: number })
   | (AgentEventBase & { type: 'run_end'; text: string; steps: number })
+  | (AgentEventBase & { type: 'run_cancelled'; reason?: string })
   | (AgentEventBase & { type: 'run_error'; error: string });
 
 export type AgentEventHandler = (event: AgentEvent) => void | Promise<void>;

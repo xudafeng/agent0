@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('agent0', {
   state: () => ipcRenderer.invoke('agent:state'),
   skillsList: () => ipcRenderer.invoke('agent:skills-list'),
   send: (prompt) => ipcRenderer.invoke('agent:send', prompt),
+  abort: () => ipcRenderer.invoke('agent:abort'),
   reset: () => ipcRenderer.invoke('agent:reset'),
   remember: (content) => ipcRenderer.invoke('agent:remember', content),
   configure: (config) => ipcRenderer.invoke('agent:configure', config),
