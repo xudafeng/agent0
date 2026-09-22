@@ -9,7 +9,7 @@ import { createSkillRuntime, type SkillSummary } from './skills.js';
 import { createSubagentRuntime } from './subagent.js';
 import { createTaskRuntime, formatTaskState, type TaskState } from './task.js';
 import { createTraceRecorder } from './trace.js';
-import { executeTool, tools as localTools } from './tools.js';
+import { adaptToolDefinitions, createToolRegistry, localAgentTools } from './tools.js';
 
 export interface RuntimeOptions {
   maxSteps?: number;
@@ -45,7 +45,14 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
   const mcp = await connectMcpServers();
   const taskRuntime = createTaskRuntime();
   const subagentRuntime = createSubagentRuntime(provider);
-  const tools = [...localTools, ...skills.tools, ...taskRuntime.tools, ...subagentRuntime.tools, ...mcp.tools];
+  const toolRegistry = createToolRegistry([
+    ...localAgentTools,
+    ...adaptToolDefinitions(skills.tools, (toolCall, context) => skills.callTool(toolCall, context.signal)),
+    ...adaptToolDefinitions(taskRuntime.tools, (toolCall) => taskRuntime.callTool(toolCall)),
+    ...adaptToolDefinitions(subagentRuntime.tools, (toolCall, context) => subagentRuntime.callTool(toolCall, context.signal)),
+    ...adaptToolDefinitions(mcp.tools, (toolCall, context) => mcp.callTool(toolCall, context.signal)),
+  ]);
+  const tools = toolRegistry.definitions;
   let memory = await loadMemory();
 
   return {
@@ -103,16 +110,10 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
               if (!availableTools.some((tool) => tool.name === toolCall.name)) {
                 throw new Error('Tool is not available for this step.');
               }
-              signal?.throwIfAborted();
-              const toolResult = skills.hasTool(toolCall.name)
-                ? await skills.callTool(toolCall, signal)
-                : taskRuntime.hasTool(toolCall.name)
-                  ? taskRuntime.callTool(toolCall)
-                  : subagentRuntime.hasTool(toolCall.name)
-                    ? await subagentRuntime.callTool(toolCall, signal)
-                    : mcp.hasTool(toolCall.name)
-                      ? await mcp.callTool(toolCall, signal)
-                      : executeTool(toolCall);
+              const toolResult = await toolRegistry.execute(
+                toolCall,
+                signal ? { signal } : {},
+              );
               toolContent = JSON.stringify({ ok: true, result: toolResult });
             } catch (error) {
               if (signal?.aborted) throw signal.reason ?? error;
