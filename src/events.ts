@@ -14,7 +14,7 @@ export type AgentEvent =
       step: number;
       metadata: Record<string, unknown>;
       contextMessages: number;
-      toolCall?: Pick<ToolCall, 'name' | 'arguments'>;
+      toolCalls?: Array<Pick<ToolCall, 'name' | 'arguments'>>;
       hasText: boolean;
     })
   | (AgentEventBase & { type: 'tool_start'; step: number; toolCall: ToolCall })

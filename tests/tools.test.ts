@@ -45,3 +45,18 @@ test('tool registry observes cancellation before execution', async () => {
   );
   assert.equal(executed, false);
 });
+
+
+test('tool registry exposes execution mode with parallel default', () => {
+  const registry = createToolRegistry([
+    tool('parallel-tool', () => 'ok'),
+    {
+      ...tool('sequential-tool', () => 'ok'),
+      executionMode: 'sequential',
+    },
+  ]);
+
+  assert.equal(registry.executionMode('parallel-tool'), 'parallel');
+  assert.equal(registry.executionMode('sequential-tool'), 'sequential');
+  assert.equal(registry.executionMode('missing'), 'parallel');
+});

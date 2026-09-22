@@ -5,12 +5,12 @@ export type Message =
   | { role: 'system'; content: string }
   | { role: 'user'; content: string }
   | { role: 'assistant'; content: string }
-  | { role: 'assistant'; toolCall: ToolCall }
+  | { role: 'assistant'; toolCalls: ToolCall[] }
   | { role: 'tool'; toolCallId: string; content: string };
 
 export interface GenerationResult {
   text?: string | undefined;
-  toolCall?: ToolCall | undefined;
+  toolCalls?: ToolCall[] | undefined;
   id: string;
   model: string;
   usage: {
@@ -41,25 +41,25 @@ function parseToolArguments(value: string): Record<string, unknown> {
 }
 
 function toOpenAIInput(messages: Message[]) {
-  return messages.map((message) => {
+  return messages.flatMap((message) => {
     if (message.role === 'system' || message.role === 'user' || ('content' in message && message.role === 'assistant')) {
-      return { role: message.role, content: message.content } as const;
+      return [{ role: message.role, content: message.content } as const];
     }
 
     if (message.role === 'assistant') {
-      return {
+      return message.toolCalls.map((toolCall) => ({
         type: 'function_call' as const,
-        call_id: message.toolCall.id,
-        name: message.toolCall.name,
-        arguments: JSON.stringify(message.toolCall.arguments),
-      };
+        call_id: toolCall.id,
+        name: toolCall.name,
+        arguments: JSON.stringify(toolCall.arguments),
+      }));
     }
 
-    return {
+    return [{
       type: 'function_call_output' as const,
       call_id: message.toolCallId,
       output: message.content,
-    };
+    }];
   });
 }
 
@@ -73,16 +73,14 @@ function toChatMessages(messages: Message[]) {
       return {
         role: 'assistant' as const,
         content: null,
-        tool_calls: [
-          {
-            id: message.toolCall.id,
-            type: 'function' as const,
-            function: {
-              name: message.toolCall.name,
-              arguments: JSON.stringify(message.toolCall.arguments),
-            },
+        tool_calls: message.toolCalls.map((toolCall) => ({
+          id: toolCall.id,
+          type: 'function' as const,
+          function: {
+            name: toolCall.name,
+            arguments: JSON.stringify(toolCall.arguments),
           },
-        ],
+        })),
       };
     }
 
@@ -115,15 +113,15 @@ export function getProvider(): Provider {
           })),
         }, { signal });
 
-        const functionCall = response.output.find((item) => item.type === 'function_call');
+        const functionCalls = response.output.filter((item) => item.type === 'function_call');
 
         return {
           text: response.output_text || undefined,
-          toolCall: functionCall && {
+          toolCalls: functionCalls.length ? functionCalls.map((functionCall) => ({
             id: functionCall.call_id,
             name: functionCall.name,
             arguments: parseToolArguments(functionCall.arguments),
-          },
+          })) : undefined,
           id: response.id,
           model: response.model,
           usage: response.usage && {
@@ -161,15 +159,15 @@ export function getProvider(): Provider {
         }, { signal });
 
         const message = response.choices[0]?.message;
-        const functionCall = message?.tool_calls?.[0];
+        const functionCalls = message?.tool_calls?.filter((toolCall) => toolCall.type === 'function') ?? [];
 
         return {
           text: message?.content || undefined,
-          toolCall: functionCall?.type === 'function' ? {
+          toolCalls: functionCalls.length ? functionCalls.map((functionCall) => ({
             id: functionCall.id,
             name: functionCall.function.name,
             arguments: parseToolArguments(functionCall.function.arguments),
-          } : undefined,
+          })) : undefined,
           id: response.id,
           model: response.model,
           usage: response.usage && {

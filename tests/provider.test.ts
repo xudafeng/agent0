@@ -28,15 +28,38 @@ test('providers expose the same generation contract', async (t) => {
         const provider = getProvider();
         const messages = [{ role: 'user' as const, content: 'hi' }];
         assert.deepEqual(await provider.generate(messages), {
-          text: 'hello', toolCall: undefined, id: 'test-id', model: 'test-model',
+          text: 'hello', toolCalls: undefined, id: 'test-id', model: 'test-model',
           usage: { inputTokens: 3, outputTokens: 2, totalTokens: 5 },
         });
+        response = name === 'openai'
+          ? {
+              object: 'response', id: 'test-tools', model: 'test-model',
+              output: [
+                { type: 'function_call', call_id: 'call-1', name: 'add', arguments: '{"a":1,"b":2}' },
+                { type: 'function_call', call_id: 'call-2', name: 'multiply', arguments: '{"a":3,"b":4}' },
+              ],
+            }
+          : {
+              id: 'test-tools', model: 'test-model',
+              choices: [{ message: { content: null, tool_calls: [
+                { id: 'call-1', type: 'function', function: { name: 'add', arguments: '{"a":1,"b":2}' } },
+                { id: 'call-2', type: 'function', function: { name: 'multiply', arguments: '{"a":3,"b":4}' } },
+              ] } }],
+            };
+        assert.deepEqual((await provider.generate(messages)).toolCalls, [
+          { id: 'call-1', name: 'add', arguments: { a: 1, b: 2 } },
+          { id: 'call-2', name: 'multiply', arguments: { a: 3, b: 4 } },
+        ]);
+
+        response = name === 'openai'
+          ? { object: 'response', id: 'test-id', model: 'test-model', output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'hello', annotations: [] }] }] }
+          : { id: 'test-id', model: 'test-model', choices: [{ message: { content: 'hello' }, finish_reason: 'stop' }] };
         delete (response as { usage?: object }).usage;
         assert.equal((await provider.generate(messages)).usage, undefined);
         response = { output: [], choices: [] };
         const empty = await provider.generate(messages);
         assert.equal(empty.text, undefined);
-        assert.equal(empty.toolCall, undefined);
+        assert.equal(empty.toolCalls, undefined);
         status = 401;
         response = { error: { message: 'invalid key' } };
         await assert.rejects(provider.generate(messages), /401/);
