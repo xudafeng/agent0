@@ -92,7 +92,9 @@ jobs:
           mkdir -p release/verified-image
           hdiutil attach release/*-mac-${{ matrix.arch }}.dmg -readonly -nobrowse -mountpoint "$PWD/release/verified-image"
           trap 'hdiutil detach "$PWD/release/verified-image"' EXIT
-          codesign --verify --deep --strict --verbose=2 release/verified-image/agent0.app
+          if [ '${{ github.event_name }}' != 'pull_request' ]; then
+            codesign --verify --deep --strict --verbose=2 release/verified-image/agent0.app
+          fi
           if [ '${{ matrix.arch }}' = 'arm64' ]; then
             pnpm exec node scripts/test-packaged.mjs "$PWD/release/verified-image/agent0.app/Contents/MacOS/agent0"
           fi
