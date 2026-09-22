@@ -40,27 +40,40 @@ function parseToolArguments(value: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
-function toOpenAIInput(messages: Message[]) {
-  return messages.flatMap((message) => {
+type OpenAIInputItem =
+  | { role: 'system' | 'user' | 'assistant'; content: string }
+  | { type: 'function_call'; call_id: string; name: string; arguments: string }
+  | { type: 'function_call_output'; call_id: string; output: string };
+
+function toOpenAIInput(messages: Message[]): OpenAIInputItem[] {
+  const input: OpenAIInputItem[] = [];
+
+  for (const message of messages) {
     if (message.role === 'system' || message.role === 'user' || ('content' in message && message.role === 'assistant')) {
-      return [{ role: message.role, content: message.content } as const];
+      input.push({ role: message.role, content: message.content });
+      continue;
     }
 
     if (message.role === 'assistant') {
-      return message.toolCalls.map((toolCall) => ({
-        type: 'function_call' as const,
-        call_id: toolCall.id,
-        name: toolCall.name,
-        arguments: JSON.stringify(toolCall.arguments),
-      }));
+      for (const toolCall of message.toolCalls) {
+        input.push({
+          type: 'function_call',
+          call_id: toolCall.id,
+          name: toolCall.name,
+          arguments: JSON.stringify(toolCall.arguments),
+        });
+      }
+      continue;
     }
 
-    return [{
-      type: 'function_call_output' as const,
+    input.push({
+      type: 'function_call_output',
       call_id: message.toolCallId,
       output: message.content,
-    }];
-  });
+    });
+  }
+
+  return input;
 }
 
 function toChatMessages(messages: Message[]) {
