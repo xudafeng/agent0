@@ -93,3 +93,67 @@ test('tool registry supports asynchronous allow policies', async () => {
 
   assert.equal(await registry.execute({ id: '1', name: 'read', arguments: {} }), 'content');
 });
+
+
+test('tool registry waits for human approval before execution', async () => {
+  const order: string[] = [];
+  const registry = createToolRegistry(
+    [tool('write', () => {
+      order.push('execute');
+      return 'written';
+    })],
+    () => ({ action: 'ask', reason: 'confirm write' }),
+  );
+
+  const result = await registry.execute(
+    { id: '1', name: 'write', arguments: {} },
+    {
+      requestApproval: async (request) => {
+        order.push(`approve:${request.reason}`);
+        return true;
+      },
+      onExecutionStart: () => { order.push('start'); },
+    },
+  );
+
+  assert.equal(result, 'written');
+  assert.deepEqual(order, ['approve:confirm write', 'start', 'execute']);
+});
+
+test('tool registry blocks denied human approval without starting execution', async () => {
+  let started = false;
+  let executed = false;
+  const registry = createToolRegistry(
+    [tool('write', () => {
+      executed = true;
+      return 'written';
+    })],
+    () => ({ action: 'ask', reason: 'confirm write' }),
+  );
+
+  await assert.rejects(
+    registry.execute(
+      { id: '1', name: 'write', arguments: {} },
+      {
+        requestApproval: () => false,
+        onExecutionStart: () => { started = true; },
+      },
+    ),
+    /Denied by user/,
+  );
+
+  assert.equal(started, false);
+  assert.equal(executed, false);
+});
+
+test('tool registry denies ask decisions when no approval handler is available', async () => {
+  const registry = createToolRegistry(
+    [tool('write', () => 'written')],
+    () => ({ action: 'ask', reason: 'confirm write' }),
+  );
+
+  await assert.rejects(
+    registry.execute({ id: '1', name: 'write', arguments: {} }),
+    /Approval required but no approval handler is available/,
+  );
+});

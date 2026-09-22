@@ -17,6 +17,8 @@ export type AgentEvent =
       toolCalls?: Array<Pick<ToolCall, 'name' | 'arguments'>>;
       hasText: boolean;
     })
+  | (AgentEventBase & { type: 'tool_approval_requested'; step: number; toolCall: ToolCall; reason: string })
+  | (AgentEventBase & { type: 'tool_approval_resolved'; step: number; toolCall: ToolCall; approved: boolean })
   | (AgentEventBase & { type: 'tool_blocked'; step: number; toolCall: ToolCall; reason: string })
   | (AgentEventBase & { type: 'tool_start'; step: number; toolCall: ToolCall })
   | (AgentEventBase & {

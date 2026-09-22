@@ -32,7 +32,7 @@ function showError(error, target = 'error') {
 
 function render(state) {
   current = state;
-  const { config, history, busy, task, memory, events } = state;
+  const { config, history, busy, task, memory, events, approval } = state;
   const locked = busy || sending;
   mcpSettings.setBusy(locked);
   skills.render(locked);
@@ -48,6 +48,17 @@ function render(state) {
   $('memory-form').querySelector('button').disabled = locked;
   $('progress').hidden = !busy;
   $('welcome').hidden = history.length > 0;
+  if (approval) {
+    $('tool-approval-reason').textContent = t(approval.reason);
+    $('tool-approval-name').textContent = approval.name;
+    $('tool-approval-arguments').textContent = JSON.stringify(approval.arguments, null, 2);
+    $('tool-approve').disabled = false;
+    $('tool-deny').disabled = false;
+    if (!$('tool-approval').open) $('tool-approval').showModal();
+  } else if ($('tool-approval').open) {
+    $('tool-approval').close();
+  }
+  renderProgress();
   const serialized = JSON.stringify(history);
   if (serialized !== renderedHistory) {
     renderedHistory = serialized;
@@ -76,14 +87,14 @@ function render(state) {
   const memoryContent = memory.replace(/^# Memory\s*/, '').trim();
   $('memory').textContent = memoryContent || t('Save useful context for future conversations.');
   $('memory').classList.toggle('empty-panel', !memoryContent);
-  const activity = events.filter((event) => ['jev_decision', 'tool_blocked', 'tool_start', 'tool_end', 'run_cancelled', 'run_error', 'run_end'].includes(event.type));
+  const activity = events.filter((event) => ['jev_decision', 'tool_approval_requested', 'tool_approval_resolved', 'tool_blocked', 'tool_start', 'tool_end', 'run_cancelled', 'run_error', 'run_end'].includes(event.type));
   $('activity-count').textContent = activity.length;
   // Avoid rebuilding activity details when only unrelated state changes.
   if ($('activity').dataset.snapshot !== JSON.stringify(activity)) {
     $('activity').dataset.snapshot = JSON.stringify(activity);
     $('activity').replaceChildren(...activity.map((event) => {
       const details = element('details', '');
-      const label = event.type === 'jev_decision' ? jevActivityLabel(event.decision) : event.type === 'tool_blocked' ? `⊘ ${t('{name} blocked', { name: event.toolCall.name })}` : event.type === 'tool_start' ? `↗ ${event.toolCall.name}` : event.type === 'tool_end' ? `${event.isError ? '!' : '✓'} ${t('{name} returned', { name: event.name })}` : event.type === 'run_cancelled' ? t('Run stopped') : event.type === 'run_error' ? t('Run failed') : t('Response ready');
+      const label = event.type === 'jev_decision' ? jevActivityLabel(event.decision) : event.type === 'tool_approval_requested' ? `? ${t('{name} needs approval', { name: event.toolCall.name })}` : event.type === 'tool_approval_resolved' ? `${event.approved ? '✓' : '⊘'} ${t(event.approved ? '{name} approved' : '{name} denied', { name: event.toolCall.name })}` : event.type === 'tool_blocked' ? `⊘ ${t('{name} blocked', { name: event.toolCall.name })}` : event.type === 'tool_start' ? `↗ ${event.toolCall.name}` : event.type === 'tool_end' ? `${event.isError ? '!' : '✓'} ${t('{name} returned', { name: event.name })}` : event.type === 'run_cancelled' ? t('Run stopped') : event.type === 'run_error' ? t('Run failed') : t('Response ready');
       details.append(element('summary', '', label), element('pre', '', JSON.stringify(event, null, 2)));
       return details;
     }));
@@ -105,6 +116,10 @@ function settings() {
 }
 
 function renderProgress() {
+  if (current?.approval) {
+    $('progress-label').textContent = t('Waiting for approval…');
+    return;
+  }
   $('progress-label').textContent = progressEvent?.type === 'tool_start'
     ? t('Using {name}…', { name: progressEvent.toolCall.name })
     : progressEvent?.type === 'tool_end' ? t('Thinking about the result…') : t('Thinking…');
@@ -121,6 +136,18 @@ for (const select of document.querySelectorAll('[data-language]')) select.onchan
     if ($(target).dataset.error) $(target).textContent = t($(target).dataset.error);
   }
 };
+
+async function resolveApproval(approved) {
+  const approval = current?.approval;
+  if (!approval) return;
+  $('tool-approve').disabled = true;
+  $('tool-deny').disabled = true;
+  try { await api.resolveApproval(approval.id, approved); }
+  catch (error) { showError(error); }
+}
+
+$('tool-approve').onclick = () => resolveApproval(true);
+$('tool-deny').onclick = () => resolveApproval(false);
 
 $('stop').onclick = async () => {
   $('stop').disabled = true;

@@ -10,13 +10,26 @@ export interface ToolCall {
   arguments: Record<string, unknown>;
 }
 
+export interface ToolApprovalRequest {
+  toolCall: ToolCall;
+  reason: string;
+}
+
+export type ToolApprovalHandler = (
+  request: ToolApprovalRequest,
+  signal?: AbortSignal,
+) => Promise<boolean> | boolean;
+
 export interface ToolExecutionContext {
   signal?: AbortSignal;
+  requestApproval?: ToolApprovalHandler;
+  onExecutionStart?: () => Promise<void> | void;
 }
 
 export type ToolPolicyDecision =
   | { action: 'allow' }
-  | { action: 'deny'; reason: string };
+  | { action: 'deny'; reason: string }
+  | { action: 'ask'; reason: string };
 
 export type ToolExecutionPolicy = (
   toolCall: ToolCall,
@@ -85,7 +98,17 @@ export function createToolRegistry(agentTools: AgentTool[], policy?: ToolExecuti
       if (decision.action === 'deny') {
         throw new ToolExecutionDeniedError(toolCall, decision.reason);
       }
+      if (decision.action === 'ask') {
+        if (!context.requestApproval) {
+          throw new ToolExecutionDeniedError(toolCall, 'Approval required but no approval handler is available.');
+        }
+        const approved = await context.requestApproval({ toolCall, reason: decision.reason }, context.signal);
+        if (!approved) {
+          throw new ToolExecutionDeniedError(toolCall, 'Denied by user.');
+        }
+      }
       context.signal?.throwIfAborted();
+      await context.onExecutionStart?.();
       return tool.execute(toolCall, context);
     },
   };

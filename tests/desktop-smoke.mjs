@@ -264,6 +264,12 @@ try {
   await evaluate('document.getElementById(\'close-mcp\').click()');
   await writeFile(join(profile, 'welcome.png'), (await window.webContents.capturePage()).toPNG());
   await evaluate(`document.getElementById('prompt').value = 'Create a plan'; document.getElementById('chat-form').requestSubmit();`);
+  for (const expected of ['mcp_smoke__greet_', 'mcp_builtin-filesystem__read_text_file_', 'mcp_remote__echo_']) {
+    await waitFor(`document.getElementById('tool-approval').open && document.getElementById('tool-approval-name').textContent.includes(${JSON.stringify(expected)})`);
+    assert.ok(await evaluate('document.getElementById(\'tool-approval-arguments\').textContent.length > 2'));
+    await evaluate('document.getElementById(\'tool-approve\').click()');
+    await waitFor('!document.getElementById(\'tool-approval\').open');
+  }
   await waitFor('document.getElementById(\'conversation\').textContent.includes(\'Desktop integration works\')');
   assert.equal(calls, 7);
   assert.deepEqual((await evaluate('window.agent0.skillsList()')).loaded, ['desktop-check']);
