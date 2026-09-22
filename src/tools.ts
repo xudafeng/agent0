@@ -16,18 +16,24 @@ export interface ToolExecutionContext {
 
 export interface AgentTool {
   definition: ToolDefinition;
+  executionMode?: 'parallel' | 'sequential';
   execute(toolCall: ToolCall, context: ToolExecutionContext): Promise<unknown> | unknown;
 }
 
 export type ToolExecutor = (toolCall: ToolCall, context: ToolExecutionContext) => Promise<unknown> | unknown;
 
-export function adaptToolDefinitions(definitions: ToolDefinition[], execute: ToolExecutor): AgentTool[] {
-  return definitions.map((definition) => ({ definition, execute }));
+export function adaptToolDefinitions(
+  definitions: ToolDefinition[],
+  execute: ToolExecutor,
+  executionMode: AgentTool['executionMode'] = 'parallel',
+): AgentTool[] {
+  return definitions.map((definition) => ({ definition, executionMode, execute }));
 }
 
 export interface ToolRegistry {
   definitions: ToolDefinition[];
   has(name: string): boolean;
+  executionMode(name: string): 'parallel' | 'sequential';
   execute(toolCall: ToolCall, context?: ToolExecutionContext): Promise<unknown>;
 }
 
@@ -46,6 +52,9 @@ export function createToolRegistry(agentTools: AgentTool[]): ToolRegistry {
     definitions: agentTools.map((tool) => tool.definition),
     has(name) {
       return registry.has(name);
+    },
+    executionMode(name) {
+      return registry.get(name)?.executionMode ?? 'parallel';
     },
     async execute(toolCall, context = {}) {
       context.signal?.throwIfAborted();

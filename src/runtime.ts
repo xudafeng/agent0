@@ -47,8 +47,8 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
   const subagentRuntime = createSubagentRuntime(provider);
   const toolRegistry = createToolRegistry([
     ...localAgentTools,
-    ...adaptToolDefinitions(skills.tools, (toolCall, context) => skills.callTool(toolCall, context.signal)),
-    ...adaptToolDefinitions(taskRuntime.tools, (toolCall) => taskRuntime.callTool(toolCall)),
+    ...adaptToolDefinitions(skills.tools, (toolCall, context) => skills.callTool(toolCall, context.signal), 'sequential'),
+    ...adaptToolDefinitions(taskRuntime.tools, (toolCall) => taskRuntime.callTool(toolCall), 'sequential'),
     ...adaptToolDefinitions(subagentRuntime.tools, (toolCall, context) => subagentRuntime.callTool(toolCall, context.signal)),
     ...adaptToolDefinitions(mcp.tools, (toolCall, context) => mcp.callTool(toolCall, context.signal)),
   ]);
@@ -88,7 +88,7 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
 
           const availableTools = routed?.tools ?? tools;
           const result = await provider.generate(context, availableTools, signal);
-          const { text, toolCall, ...metadata } = result;
+          const { text, toolCalls, ...metadata } = result;
 
           await emit({
             ...base(),
@@ -96,44 +96,63 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
             step,
             metadata,
             contextMessages: context.length,
-            ...(toolCall ? { toolCall: { name: toolCall.name, arguments: toolCall.arguments } } : {}),
+            ...(toolCalls?.length ? { toolCalls: toolCalls.map(({ name, arguments: arguments_ }) => ({ name, arguments: arguments_ })) } : {}),
             hasText: Boolean(text),
           });
 
-          if (toolCall) {
-            messages.push({ role: 'assistant', toolCall });
-            await emit({ ...base(), type: 'tool_start', step, toolCall });
+          if (toolCalls?.length) {
+            messages.push({ role: 'assistant', toolCalls });
 
-            let toolContent: string;
-            let isError = false;
-            try {
-              if (!availableTools.some((tool) => tool.name === toolCall.name)) {
-                throw new Error('Tool is not available for this step.');
+            const executeOne = async (toolCall: (typeof toolCalls)[number]) => {
+              await emit({ ...base(), type: 'tool_start', step, toolCall });
+
+              let toolContent: string;
+              let isError = false;
+              try {
+                if (!availableTools.some((tool) => tool.name === toolCall.name)) {
+                  throw new Error('Tool is not available for this step.');
+                }
+                const toolResult = await toolRegistry.execute(
+                  toolCall,
+                  signal ? { signal } : {},
+                );
+                toolContent = JSON.stringify({ ok: true, result: toolResult });
+              } catch (error) {
+                if (signal?.aborted) throw signal.reason ?? error;
+                isError = true;
+                toolContent = JSON.stringify({
+                  ok: false,
+                  error: error instanceof Error ? error.message : String(error),
+                });
               }
-              const toolResult = await toolRegistry.execute(
-                toolCall,
-                signal ? { signal } : {},
-              );
-              toolContent = JSON.stringify({ ok: true, result: toolResult });
-            } catch (error) {
-              if (signal?.aborted) throw signal.reason ?? error;
-              isError = true;
-              toolContent = JSON.stringify({
-                ok: false,
-                error: error instanceof Error ? error.message : String(error),
+
+              await emit({
+                ...base(),
+                type: 'tool_end',
+                step,
+                toolCallId: toolCall.id,
+                name: toolCall.name,
+                result: toolContent,
+                isError,
               });
+              return { toolCall, toolContent };
+            };
+
+            const sequential = toolCalls.some((toolCall) => toolRegistry.executionMode(toolCall.name) === 'sequential');
+            const toolResults: Array<{ toolCall: (typeof toolCalls)[number]; toolContent: string }> = [];
+
+            if (sequential) {
+              for (const toolCall of toolCalls) {
+                toolResults.push(await executeOne(toolCall));
+              }
+            } else {
+              toolResults.push(...await Promise.all(toolCalls.map(executeOne)));
             }
 
-            messages.push({ role: 'tool', toolCallId: toolCall.id, content: toolContent });
-            await emit({
-              ...base(),
-              type: 'tool_end',
-              step,
-              toolCallId: toolCall.id,
-              name: toolCall.name,
-              result: toolContent,
-              isError,
-            });
+            for (const { toolCall, toolContent } of toolResults) {
+              messages.push({ role: 'tool', toolCallId: toolCall.id, content: toolContent });
+            }
+
             await emit({ ...base(), type: 'turn_end', step });
             continue;
           }
