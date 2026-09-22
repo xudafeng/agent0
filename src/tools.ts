@@ -10,9 +10,52 @@ export interface ToolCall {
   arguments: Record<string, unknown>;
 }
 
-interface RegisteredTool {
+export interface ToolExecutionContext {
+  signal?: AbortSignal;
+}
+
+export interface AgentTool {
   definition: ToolDefinition;
-  execute(arguments_: Record<string, unknown>): unknown;
+  execute(toolCall: ToolCall, context: ToolExecutionContext): Promise<unknown> | unknown;
+}
+
+export type ToolExecutor = (toolCall: ToolCall, context: ToolExecutionContext) => Promise<unknown> | unknown;
+
+export function adaptToolDefinitions(definitions: ToolDefinition[], execute: ToolExecutor): AgentTool[] {
+  return definitions.map((definition) => ({ definition, execute }));
+}
+
+export interface ToolRegistry {
+  definitions: ToolDefinition[];
+  has(name: string): boolean;
+  execute(toolCall: ToolCall, context?: ToolExecutionContext): Promise<unknown>;
+}
+
+export function createToolRegistry(agentTools: AgentTool[]): ToolRegistry {
+  const registry = new Map<string, AgentTool>();
+
+  for (const tool of agentTools) {
+    const { name } = tool.definition;
+    if (registry.has(name)) {
+      throw new Error(`Duplicate tool: ${name}`);
+    }
+    registry.set(name, tool);
+  }
+
+  return {
+    definitions: agentTools.map((tool) => tool.definition),
+    has(name) {
+      return registry.has(name);
+    },
+    async execute(toolCall, context = {}) {
+      context.signal?.throwIfAborted();
+      const tool = registry.get(toolCall.name);
+      if (!tool) {
+        throw new Error(`Unknown tool: ${toolCall.name}`);
+      }
+      return tool.execute(toolCall, context);
+    },
+  };
 }
 
 function requireNumbers(arguments_: Record<string, unknown>) {
@@ -23,8 +66,8 @@ function requireNumbers(arguments_: Record<string, unknown>) {
   return { a, b };
 }
 
-const registry: Record<string, RegisteredTool> = {
-  add: {
+export const localAgentTools: AgentTool[] = [
+  {
     definition: {
       name: 'add',
       description: 'Add two numbers.',
@@ -38,12 +81,12 @@ const registry: Record<string, RegisteredTool> = {
         additionalProperties: false,
       },
     },
-    execute(arguments_) {
-      const { a, b } = requireNumbers(arguments_);
+    execute(toolCall) {
+      const { a, b } = requireNumbers(toolCall.arguments);
       return a + b;
     },
   },
-  subtract: {
+  {
     definition: {
       name: 'subtract',
       description: 'Subtract the second number from the first number.',
@@ -57,12 +100,12 @@ const registry: Record<string, RegisteredTool> = {
         additionalProperties: false,
       },
     },
-    execute(arguments_) {
-      const { a, b } = requireNumbers(arguments_);
+    execute(toolCall) {
+      const { a, b } = requireNumbers(toolCall.arguments);
       return a - b;
     },
   },
-  multiply: {
+  {
     definition: {
       name: 'multiply',
       description: 'Multiply two numbers.',
@@ -76,19 +119,17 @@ const registry: Record<string, RegisteredTool> = {
         additionalProperties: false,
       },
     },
-    execute(arguments_) {
-      const { a, b } = requireNumbers(arguments_);
+    execute(toolCall) {
+      const { a, b } = requireNumbers(toolCall.arguments);
       return a * b;
     },
   },
-};
+];
 
-export const tools: ToolDefinition[] = Object.values(registry).map((tool) => tool.definition);
+export const tools: ToolDefinition[] = localAgentTools.map((tool) => tool.definition);
 
-export function executeTool(toolCall: ToolCall): unknown {
-  const tool = registry[toolCall.name];
-  if (!tool) {
-    throw new Error(`Unknown tool: ${toolCall.name}`);
-  }
-  return tool.execute(toolCall.arguments);
+const localRegistry = createToolRegistry(localAgentTools);
+
+export function executeTool(toolCall: ToolCall): Promise<unknown> {
+  return localRegistry.execute(toolCall);
 }
