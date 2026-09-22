@@ -9,12 +9,13 @@ import { createSkillRuntime, type SkillSummary } from './skills.js';
 import { createSubagentRuntime } from './subagent.js';
 import { createTaskRuntime, formatTaskState, type TaskState } from './task.js';
 import { createTraceRecorder } from './trace.js';
-import { adaptToolDefinitions, createToolRegistry, localAgentTools, ToolExecutionDeniedError, type ToolExecutionPolicy } from './tools.js';
+import { adaptToolDefinitions, createToolRegistry, localAgentTools, ToolExecutionDeniedError, type ToolApprovalHandler, type ToolExecutionContext, type ToolExecutionPolicy } from './tools.js';
 
 export interface RuntimeOptions {
   maxSteps?: number;
   skillDirectories?: string[];
   toolPolicy?: ToolExecutionPolicy;
+  requestToolApproval?: ToolApprovalHandler;
 }
 
 export interface RunResult {
@@ -39,6 +40,7 @@ export interface AgentRuntime {
 
 export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<AgentRuntime> {
   const maxSteps = options.maxSteps ?? 8;
+  const requestToolApproval = options.requestToolApproval;
   const provider = getProvider();
   const route = createJevRouter();
   const messages: Message[] = [];
@@ -105,18 +107,37 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
             messages.push({ role: 'assistant', toolCalls });
 
             const executeOne = async (toolCall: (typeof toolCalls)[number]) => {
-              await emit({ ...base(), type: 'tool_start', step, toolCall });
-
               let toolContent: string;
               let isError = false;
               try {
                 if (!availableTools.some((tool) => tool.name === toolCall.name)) {
                   throw new Error('Tool is not available for this step.');
                 }
-                const toolResult = await toolRegistry.execute(
-                  toolCall,
-                  signal ? { signal } : {},
-                );
+                const executionContext: ToolExecutionContext = {
+                  ...(signal ? { signal } : {}),
+                  onExecutionStart: () => emit({ ...base(), type: 'tool_start', step, toolCall }),
+                  ...(requestToolApproval ? {
+                    requestApproval: async (request, approvalSignal) => {
+                      await emit({
+                        ...base(),
+                        type: 'tool_approval_requested',
+                        step,
+                        toolCall,
+                        reason: request.reason,
+                      });
+                      const approved = await requestToolApproval(request, approvalSignal);
+                      await emit({
+                        ...base(),
+                        type: 'tool_approval_resolved',
+                        step,
+                        toolCall,
+                        approved,
+                      });
+                      return approved;
+                    },
+                  } : {}),
+                };
+                const toolResult = await toolRegistry.execute(toolCall, executionContext);
                 toolContent = JSON.stringify({ ok: true, result: toolResult });
               } catch (error) {
                 if (signal?.aborted) throw signal.reason ?? error;

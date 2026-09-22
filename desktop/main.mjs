@@ -17,6 +17,8 @@ let window;
 let runtime;
 let busy = false;
 let runController;
+let pendingApproval;
+const approvalQueue = [];
 let history = [];
 let events = [];
 let configPath;
@@ -36,15 +38,59 @@ function configuration() {
 }
 
 function state() {
-  return { history, events, busy, config: configuration(), memory: runtime?.getMemory() || savedMemory, task: runtime?.getTaskState() || null };
+  const approval = pendingApproval ? {
+    id: pendingApproval.request.toolCall.id,
+    name: pendingApproval.request.toolCall.name,
+    arguments: pendingApproval.request.toolCall.arguments,
+    reason: pendingApproval.request.reason,
+  } : null;
+  return { history, events, busy, approval, config: configuration(), memory: runtime?.getMemory() || savedMemory, task: runtime?.getTaskState() || null };
 }
 
 function publish(type, data) {
   if (window && !window.isDestroyed()) window.webContents.send('agent:event', { type, data });
 }
 
+function showNextApproval() {
+  if (pendingApproval || !approvalQueue.length) return;
+  pendingApproval = approvalQueue.shift();
+  publish('state', state());
+}
+
+function finishApproval(entry, approved, error) {
+  entry.signal?.removeEventListener('abort', entry.onAbort);
+  if (pendingApproval === entry) pendingApproval = undefined;
+  else {
+    const index = approvalQueue.indexOf(entry);
+    if (index >= 0) approvalQueue.splice(index, 1);
+  }
+  if (error) entry.reject(error);
+  else entry.resolve(Boolean(approved));
+  showNextApproval();
+  publish('state', state());
+}
+
+function requestToolApproval(request, signal) {
+  return new Promise((resolve, reject) => {
+    const entry = { request, signal, resolve, reject, onAbort: undefined };
+    entry.onAbort = () => finishApproval(entry, false, signal?.reason || new Error('Stopped by user.'));
+    if (signal?.aborted) {
+      reject(signal.reason || new Error('Stopped by user.'));
+      return;
+    }
+    signal?.addEventListener('abort', entry.onAbort, { once: true });
+    approvalQueue.push(entry);
+    showNextApproval();
+  });
+}
+
 async function getRuntime() {
-  runtime ||= await createAgentRuntime();
+  runtime ||= await createAgentRuntime({
+    toolPolicy: (toolCall) => toolCall.name.startsWith('mcp_')
+      ? { action: 'ask', reason: 'MCP tool requires approval before execution.' }
+      : { action: 'allow' },
+    requestToolApproval,
+  });
   return runtime;
 }
 
@@ -73,6 +119,14 @@ ipcMain.handle('agent:abort', (event) => {
   if (event.sender !== window?.webContents || event.senderFrame !== window.webContents.mainFrame) throw new Error('Unknown sender.');
   if (!runController) return false;
   runController.abort(new Error('Stopped by user.'));
+  return true;
+});
+
+ipcMain.handle('agent:approval-resolve', (event, input) => {
+  if (event.sender !== window?.webContents || event.senderFrame !== window.webContents.mainFrame) throw new Error('Unknown sender.');
+  if (!input || typeof input.id !== 'string' || typeof input.approved !== 'boolean') throw new Error('Invalid approval response.');
+  if (!pendingApproval || pendingApproval.request.toolCall.id !== input.id) throw new Error('Approval request is no longer active.');
+  finishApproval(pendingApproval, input.approved);
   return true;
 });
 
