@@ -9,11 +9,12 @@ import { createSkillRuntime, type SkillSummary } from './skills.js';
 import { createSubagentRuntime } from './subagent.js';
 import { createTaskRuntime, formatTaskState, type TaskState } from './task.js';
 import { createTraceRecorder } from './trace.js';
-import { adaptToolDefinitions, createToolRegistry, localAgentTools } from './tools.js';
+import { adaptToolDefinitions, createToolRegistry, localAgentTools, ToolExecutionDeniedError, type ToolExecutionPolicy } from './tools.js';
 
 export interface RuntimeOptions {
   maxSteps?: number;
   skillDirectories?: string[];
+  toolPolicy?: ToolExecutionPolicy;
 }
 
 export interface RunResult {
@@ -51,7 +52,7 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
     ...adaptToolDefinitions(taskRuntime.tools, (toolCall) => taskRuntime.callTool(toolCall), 'sequential'),
     ...adaptToolDefinitions(subagentRuntime.tools, (toolCall, context) => subagentRuntime.callTool(toolCall, context.signal)),
     ...adaptToolDefinitions(mcp.tools, (toolCall, context) => mcp.callTool(toolCall, context.signal)),
-  ]);
+  ], options.toolPolicy);
   const tools = toolRegistry.definitions;
   let memory = await loadMemory();
 
@@ -120,6 +121,15 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
               } catch (error) {
                 if (signal?.aborted) throw signal.reason ?? error;
                 isError = true;
+                if (error instanceof ToolExecutionDeniedError) {
+                  await emit({
+                    ...base(),
+                    type: 'tool_blocked',
+                    step,
+                    toolCall,
+                    reason: error.reason,
+                  });
+                }
                 toolContent = JSON.stringify({
                   ok: false,
                   error: error instanceof Error ? error.message : String(error),
