@@ -36,9 +36,17 @@ export type ToolExecutionPolicy = (
   context: ToolExecutionContext,
 ) => Promise<ToolPolicyDecision> | ToolPolicyDecision;
 
+export interface ToolRetryPolicy {
+  maxAttempts: number;
+  delayMs?: number;
+  shouldRetry(error: unknown): boolean;
+}
+
 export interface AgentTool {
   definition: ToolDefinition;
   executionMode?: 'parallel' | 'sequential';
+  idempotency?: 'idempotent' | 'non-idempotent';
+  retry?: ToolRetryPolicy;
   timeoutMs?: number;
   execute(toolCall: ToolCall, context: ToolExecutionContext): Promise<unknown> | unknown;
 }
@@ -94,6 +102,15 @@ export function createToolRegistry(agentTools: AgentTool[], policy?: ToolExecuti
     if (registry.has(name)) {
       throw new Error(`Duplicate tool: ${name}`);
     }
+    if (tool.retry && tool.idempotency !== 'idempotent') {
+      throw new Error(`Retry requires idempotent tool: ${name}`);
+    }
+    if (tool.retry && (!Number.isInteger(tool.retry.maxAttempts) || tool.retry.maxAttempts < 2 || tool.retry.maxAttempts > 5)) {
+      throw new Error(`Invalid retry attempts for tool ${name}: ${tool.retry.maxAttempts}`);
+    }
+    if (tool.retry?.delayMs !== undefined && (!Number.isFinite(tool.retry.delayMs) || tool.retry.delayMs < 0 || tool.retry.delayMs > 30000)) {
+      throw new Error(`Invalid retry delay for tool ${name}: ${tool.retry.delayMs}`);
+    }
     registry.set(name, tool);
   }
 
@@ -127,31 +144,58 @@ export function createToolRegistry(agentTools: AgentTool[], policy?: ToolExecuti
       context.signal?.throwIfAborted();
       await context.onExecutionStart?.();
 
-      if (tool.timeoutMs === undefined) {
-        return tool.execute(toolCall, context);
-      }
-      if (!Number.isFinite(tool.timeoutMs) || tool.timeoutMs <= 0) {
-        throw new Error(`Invalid timeout for tool ${toolCall.name}: ${tool.timeoutMs}`);
+      const executeAttempt = async (): Promise<unknown> => {
+        if (tool.timeoutMs === undefined) {
+          return tool.execute(toolCall, context);
+        }
+        if (!Number.isFinite(tool.timeoutMs) || tool.timeoutMs <= 0) {
+          throw new Error(`Invalid timeout for tool ${toolCall.name}: ${tool.timeoutMs}`);
+        }
+
+        const timeoutController = new AbortController();
+        const timeout = setTimeout(() => {
+          timeoutController.abort(new ToolExecutionTimeoutError(toolCall, tool.timeoutMs!));
+        }, tool.timeoutMs);
+        const signal = context.signal
+          ? AbortSignal.any([context.signal, timeoutController.signal])
+          : timeoutController.signal;
+
+        try {
+          return await Promise.race([
+            Promise.resolve(tool.execute(toolCall, { ...context, signal })),
+            new Promise<never>((_, reject) => {
+              signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+            }),
+          ]);
+        } finally {
+          clearTimeout(timeout);
+        }
+      };
+
+      const maxAttempts = tool.retry?.maxAttempts ?? 1;
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        context.signal?.throwIfAborted();
+        try {
+          return await executeAttempt();
+        } catch (error) {
+          context.signal?.throwIfAborted();
+          if (!tool.retry || attempt >= maxAttempts || !tool.retry.shouldRetry(error)) {
+            throw error;
+          }
+          const delayMs = tool.retry.delayMs ?? 0;
+          if (delayMs > 0) {
+            await new Promise<void>((resolve, reject) => {
+              const timer = setTimeout(resolve, delayMs);
+              context.signal?.addEventListener('abort', () => {
+                clearTimeout(timer);
+                reject(context.signal!.reason);
+              }, { once: true });
+            });
+          }
+        }
       }
 
-      const timeoutController = new AbortController();
-      const timeout = setTimeout(() => {
-        timeoutController.abort(new ToolExecutionTimeoutError(toolCall, tool.timeoutMs!));
-      }, tool.timeoutMs);
-      const signal = context.signal
-        ? AbortSignal.any([context.signal, timeoutController.signal])
-        : timeoutController.signal;
-
-      try {
-        return await Promise.race([
-          Promise.resolve(tool.execute(toolCall, { ...context, signal })),
-          new Promise<never>((_, reject) => {
-            signal.addEventListener('abort', () => reject(signal.reason), { once: true });
-          }),
-        ]);
-      } finally {
-        clearTimeout(timeout);
-      }
+      throw new Error('Unreachable retry state.');
     },
   };
 }
