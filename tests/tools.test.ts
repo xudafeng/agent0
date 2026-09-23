@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createToolRegistry, ToolExecutionDeniedError, type AgentTool } from '../src/tools.js';
+import { createToolRegistry, ToolExecutionDeniedError, ToolExecutionTimeoutError, type AgentTool } from '../src/tools.js';
 
 const tool = (name: string, execute: AgentTool['execute']): AgentTool => ({
   definition: {
@@ -156,4 +156,52 @@ test('tool registry denies ask decisions when no approval handler is available',
     registry.execute({ id: '1', name: 'write', arguments: {} }),
     /Approval required but no approval handler is available/,
   );
+});
+
+
+test('tool registry enforces opt-in execution timeout', async () => {
+  const slow: AgentTool = {
+    ...tool('slow', async (_call, context) => {
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(resolve, 1000);
+        context.signal?.addEventListener('abort', () => {
+          clearTimeout(timer);
+          reject(context.signal!.reason);
+        }, { once: true });
+      });
+      return 'late';
+    }),
+    timeoutMs: 10,
+  };
+  const registry = createToolRegistry([slow]);
+
+  await assert.rejects(
+    registry.execute({ id: '1', name: 'slow', arguments: {} }),
+    (error: unknown) => {
+      assert.ok(error instanceof ToolExecutionTimeoutError);
+      assert.equal(error.timeoutMs, 10);
+      assert.equal(error.toolCall.name, 'slow');
+      return true;
+    },
+  );
+});
+
+test('parent cancellation wins over tool timeout', async () => {
+  const slow: AgentTool = {
+    ...tool('slow', async (_call, context) => {
+      await new Promise((_resolve, reject) => {
+        context.signal?.addEventListener('abort', () => reject(context.signal!.reason), { once: true });
+      });
+    }),
+    timeoutMs: 1000,
+  };
+  const registry = createToolRegistry([slow]);
+  const controller = new AbortController();
+  const result = registry.execute(
+    { id: '1', name: 'slow', arguments: {} },
+    { signal: controller.signal },
+  );
+
+  controller.abort(new Error('user stop'));
+  await assert.rejects(result, /user stop/);
 });

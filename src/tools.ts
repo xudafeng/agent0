@@ -39,6 +39,7 @@ export type ToolExecutionPolicy = (
 export interface AgentTool {
   definition: ToolDefinition;
   executionMode?: 'parallel' | 'sequential';
+  timeoutMs?: number;
   execute(toolCall: ToolCall, context: ToolExecutionContext): Promise<unknown> | unknown;
 }
 
@@ -48,8 +49,24 @@ export function adaptToolDefinitions(
   definitions: ToolDefinition[],
   execute: ToolExecutor,
   executionMode: AgentTool['executionMode'] = 'parallel',
+  timeoutMs?: number,
 ): AgentTool[] {
-  return definitions.map((definition) => ({ definition, executionMode, execute }));
+  return definitions.map((definition) => ({
+    definition,
+    executionMode,
+    ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    execute,
+  }));
+}
+
+export class ToolExecutionTimeoutError extends Error {
+  constructor(
+    public readonly toolCall: ToolCall,
+    public readonly timeoutMs: number,
+  ) {
+    super(`Tool execution timed out after ${timeoutMs} ms: ${toolCall.name}`);
+    this.name = 'ToolExecutionTimeoutError';
+  }
 }
 
 export class ToolExecutionDeniedError extends Error {
@@ -109,7 +126,32 @@ export function createToolRegistry(agentTools: AgentTool[], policy?: ToolExecuti
       }
       context.signal?.throwIfAborted();
       await context.onExecutionStart?.();
-      return tool.execute(toolCall, context);
+
+      if (tool.timeoutMs === undefined) {
+        return tool.execute(toolCall, context);
+      }
+      if (!Number.isFinite(tool.timeoutMs) || tool.timeoutMs <= 0) {
+        throw new Error(`Invalid timeout for tool ${toolCall.name}: ${tool.timeoutMs}`);
+      }
+
+      const timeoutController = new AbortController();
+      const timeout = setTimeout(() => {
+        timeoutController.abort(new ToolExecutionTimeoutError(toolCall, tool.timeoutMs!));
+      }, tool.timeoutMs);
+      const signal = context.signal
+        ? AbortSignal.any([context.signal, timeoutController.signal])
+        : timeoutController.signal;
+
+      try {
+        return await Promise.race([
+          Promise.resolve(tool.execute(toolCall, { ...context, signal })),
+          new Promise<never>((_, reject) => {
+            signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+          }),
+        ]);
+      } finally {
+        clearTimeout(timeout);
+      }
     },
   };
 }
