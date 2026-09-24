@@ -5,6 +5,7 @@ import { createJevRouter } from './jev.js';
 import { loadMemory, remember as persistMemory } from './memory.js';
 import { connectMcpServers } from './mcp.js';
 import { getProvider, type Message } from './provider.js';
+import { createFileRunStore, type RunCheckpoint, type RunStore, type RunStatus } from './run-store.js';
 import { createSkillRuntime, type SkillSummary } from './skills.js';
 import { createSubagentRuntime } from './subagent.js';
 import { createTaskRuntime, formatTaskState, type TaskState } from './task.js';
@@ -16,6 +17,7 @@ export interface RuntimeOptions {
   skillDirectories?: string[];
   toolPolicy?: ToolExecutionPolicy;
   requestToolApproval?: ToolApprovalHandler;
+  runStore?: RunStore;
 }
 
 export interface RunResult {
@@ -41,6 +43,7 @@ export interface AgentRuntime {
 export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<AgentRuntime> {
   const maxSteps = options.maxSteps ?? 8;
   const requestToolApproval = options.requestToolApproval;
+  const runStore = options.runStore ?? createFileRunStore();
   const provider = getProvider();
   const route = createJevRouter();
   const messages: Message[] = [];
@@ -68,18 +71,40 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
       }
 
       const runId = randomUUID();
+      const createdAt = new Date().toISOString();
       const trace = await createTraceRecorder();
       const emit = async (event: AgentEvent) => {
         await trace.record(event);
         await onEvent?.(event);
       };
       const base = () => ({ runId, timestamp: new Date().toISOString() });
+      const checkpoint = async (
+        status: RunStatus,
+        step: number,
+        extras: Pick<RunCheckpoint, 'result' | 'error'> = {},
+      ) => {
+        const task = taskRuntime.getState();
+        await runStore.save({
+          runId,
+          status,
+          prompt: value,
+          step,
+          messages: structuredClone(messages),
+          ...(task ? { task: structuredClone(task) } : {}),
+          ...extras,
+          createdAt,
+          updatedAt: new Date().toISOString(),
+        });
+      };
 
       await emit({ ...base(), type: 'run_start', prompt: value });
       messages.push({ role: 'user', content: value });
+      await checkpoint('running', 0);
+      let currentStep = 0;
 
       try {
         for (let step = 1; step <= maxSteps; step += 1) {
+          currentStep = step;
           signal?.throwIfAborted();
           await emit({ ...base(), type: 'turn_start', step });
 
@@ -185,12 +210,14 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
             }
 
             await emit({ ...base(), type: 'turn_end', step });
+            await checkpoint('running', step);
             continue;
           }
 
           if (text) {
             messages.push({ role: 'assistant', content: text });
             await emit({ ...base(), type: 'turn_end', step });
+            await checkpoint('completed', step, { result: text });
             await emit({ ...base(), type: 'run_end', text, steps: step });
             return { runId, text, steps: step };
           }
@@ -201,17 +228,23 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
         throw new Error(`Agent run exceeded max steps: ${maxSteps}`);
       } catch (error) {
         if (signal?.aborted) {
+          const reason = signal.reason === undefined
+            ? undefined
+            : signal.reason instanceof Error ? signal.reason.message : String(signal.reason);
+          await checkpoint('cancelled', currentStep, reason ? { error: reason } : {});
           await emit({
             ...base(),
             type: 'run_cancelled',
-            ...(signal.reason === undefined ? {} : { reason: signal.reason instanceof Error ? signal.reason.message : String(signal.reason) }),
+            ...(reason === undefined ? {} : { reason }),
           });
           throw error;
         }
+        const message = error instanceof Error ? error.message : String(error);
+        await checkpoint('failed', currentStep, { error: message });
         await emit({
           ...base(),
           type: 'run_error',
-          error: error instanceof Error ? error.message : String(error),
+          error: message,
         });
         throw error;
       }
