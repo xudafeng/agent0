@@ -108,6 +108,16 @@ export async function createSkillRuntime(directories = skillDirectories()) {
     diagnostics,
     list(): SkillSummary[] { return [...catalog.values()]; },
     loaded(): string[] { return [...active.keys()]; },
+    async restore(names: string[]): Promise<void> {
+      active.clear();
+      for (const name of names) {
+        const skill = catalog.get(name);
+        if (!skill) throw new Error(`Cannot restore unknown skill: ${name}`);
+        const parsed = parseSkill(await readFileWithin(dirname(skill.path), skill.path));
+        if (parsed.name !== skill.name) throw new Error(`Cannot restore changed skill: ${name}`);
+        active.set(skill.name, parsed.body);
+      }
+    },
     hasTool(name: string): boolean { return tools.some((tool) => tool.name === name); },
     context(): string {
       if (!catalog.size) return '';

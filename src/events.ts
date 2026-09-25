@@ -7,6 +7,7 @@ interface AgentEventBase {
 
 export type AgentEvent =
   | (AgentEventBase & { type: 'run_start'; prompt: string })
+  | (AgentEventBase & { type: 'run_resumed'; fromStep: number })
   | (AgentEventBase & { type: 'turn_start'; step: number })
   | (AgentEventBase & { type: 'jev_decision'; step: number; decision: Record<string, unknown> })
   | (AgentEventBase & {
