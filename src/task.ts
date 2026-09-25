@@ -17,6 +17,7 @@ export interface TaskRuntime {
   hasTool(name: string): boolean;
   callTool(toolCall: ToolCall): unknown;
   getState(): TaskState | undefined;
+  restore(next: TaskState | undefined): void;
 }
 
 function requireStringArray(value: unknown, name: string): string[] {
@@ -114,6 +115,9 @@ export function createTaskRuntime(): TaskRuntime {
     },
     getState() {
       return state;
+    },
+    restore(next) {
+      state = next ? structuredClone(next) : undefined;
     },
   };
 }

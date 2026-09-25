@@ -4,7 +4,7 @@ import type { AgentEvent, AgentEventHandler } from './events.js';
 import { createJevRouter } from './jev.js';
 import { loadMemory, remember as persistMemory } from './memory.js';
 import { connectMcpServers } from './mcp.js';
-import { getProvider, type Message } from './provider.js';
+import { getProvider, type Message, type Provider } from './provider.js';
 import { createFileRunStore, type RunCheckpoint, type RunStore, type RunStatus } from './run-store.js';
 import { createSkillRuntime, type SkillSummary } from './skills.js';
 import { createSubagentRuntime } from './subagent.js';
@@ -18,6 +18,7 @@ export interface RuntimeOptions {
   toolPolicy?: ToolExecutionPolicy;
   requestToolApproval?: ToolApprovalHandler;
   runStore?: RunStore;
+  provider?: Provider;
 }
 
 export interface RunResult {
@@ -33,6 +34,7 @@ export interface RunOptions {
 
 export interface AgentRuntime {
   run(prompt: string, options?: RunOptions): Promise<RunResult>;
+  resume(runId: string, options?: RunOptions): Promise<RunResult>;
   remember(content: string): Promise<void>;
   getMemory(): string;
   getTaskState(): TaskState | undefined;
@@ -44,7 +46,7 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
   const maxSteps = options.maxSteps ?? 8;
   const requestToolApproval = options.requestToolApproval;
   const runStore = options.runStore ?? createFileRunStore();
-  const provider = getProvider();
+  const provider = options.provider ?? getProvider();
   const route = createJevRouter();
   const messages: Message[] = [];
   const skills = await createSkillRuntime(options.skillDirectories);
@@ -61,10 +63,204 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
   const tools = toolRegistry.definitions;
   let memory = await loadMemory();
 
+  const continueRun = async (
+    runId: string,
+    value: string,
+    createdAt: string,
+    startStep: number,
+    resumed: boolean,
+    runOptions: RunOptions,
+  ): Promise<RunResult> => {
+    const { onEvent, signal } = runOptions;
+    signal?.throwIfAborted();
+    const trace = await createTraceRecorder();
+    const emit = async (event: AgentEvent) => {
+      await trace.record(event);
+      await onEvent?.(event);
+    };
+    const base = () => ({ runId, timestamp: new Date().toISOString() });
+    const checkpoint = async (
+      status: RunStatus,
+      step: number,
+      extras: Pick<RunCheckpoint, 'result' | 'error'> = {},
+    ) => {
+      const task = taskRuntime.getState();
+      const loadedSkills = skills.loaded();
+      await runStore.save({
+        runId,
+        status,
+        prompt: value,
+        step,
+        messages: structuredClone(messages),
+        ...(task ? { task: structuredClone(task) } : {}),
+        ...(loadedSkills.length ? { skills: [...loadedSkills] } : {}),
+        ...extras,
+        createdAt,
+        updatedAt: new Date().toISOString(),
+      });
+    };
+
+    if (resumed) {
+      await emit({ ...base(), type: 'run_resumed', fromStep: startStep - 1 });
+      await checkpoint('running', startStep - 1);
+    } else {
+      await emit({ ...base(), type: 'run_start', prompt: value });
+      await checkpoint('running', 0);
+    }
+
+    let currentStep = startStep - 1;
+
+    try {
+      for (let step = startStep; step <= maxSteps; step += 1) {
+        currentStep = step;
+        signal?.throwIfAborted();
+        await emit({ ...base(), type: 'turn_start', step });
+
+        const context = buildContext(memory, messages, taskRuntime.getState(), skills.context());
+        const routed = await route?.(context, tools, signal);
+        if (routed) {
+          await emit({ ...base(), type: 'jev_decision', step, decision: { ...routed.decision } });
+        }
+
+        const availableTools = routed?.tools ?? tools;
+        const result = await provider.generate(context, availableTools, signal);
+        const { text, toolCalls, ...metadata } = result;
+
+        await emit({
+          ...base(),
+          type: 'model_result',
+          step,
+          metadata,
+          contextMessages: context.length,
+          ...(toolCalls?.length ? { toolCalls: toolCalls.map(({ name, arguments: arguments_ }) => ({ name, arguments: arguments_ })) } : {}),
+          hasText: Boolean(text),
+        });
+
+        if (toolCalls?.length) {
+          messages.push({ role: 'assistant', toolCalls });
+
+          const executeOne = async (toolCall: (typeof toolCalls)[number]) => {
+            let toolContent: string;
+            let isError = false;
+            try {
+              if (!availableTools.some((tool) => tool.name === toolCall.name)) {
+                throw new Error('Tool is not available for this step.');
+              }
+              const executionContext: ToolExecutionContext = {
+                ...(signal ? { signal } : {}),
+                onExecutionStart: () => emit({ ...base(), type: 'tool_start', step, toolCall }),
+                ...(requestToolApproval ? {
+                  requestApproval: async (request, approvalSignal) => {
+                    await emit({
+                      ...base(),
+                      type: 'tool_approval_requested',
+                      step,
+                      toolCall,
+                      reason: request.reason,
+                    });
+                    const approved = await requestToolApproval(request, approvalSignal);
+                    await emit({
+                      ...base(),
+                      type: 'tool_approval_resolved',
+                      step,
+                      toolCall,
+                      approved,
+                    });
+                    return approved;
+                  },
+                } : {}),
+              };
+              const toolResult = await toolRegistry.execute(toolCall, executionContext);
+              toolContent = JSON.stringify({ ok: true, result: toolResult });
+            } catch (error) {
+              if (signal?.aborted) throw signal.reason ?? error;
+              isError = true;
+              if (error instanceof ToolExecutionDeniedError) {
+                await emit({
+                  ...base(),
+                  type: 'tool_blocked',
+                  step,
+                  toolCall,
+                  reason: error.reason,
+                });
+              }
+              toolContent = JSON.stringify({
+                ok: false,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+
+            await emit({
+              ...base(),
+              type: 'tool_end',
+              step,
+              toolCallId: toolCall.id,
+              name: toolCall.name,
+              result: toolContent,
+              isError,
+            });
+            return { toolCall, toolContent };
+          };
+
+          const sequential = toolCalls.some((toolCall) => toolRegistry.executionMode(toolCall.name) === 'sequential');
+          const toolResults: Array<{ toolCall: (typeof toolCalls)[number]; toolContent: string }> = [];
+
+          if (sequential) {
+            for (const toolCall of toolCalls) {
+              toolResults.push(await executeOne(toolCall));
+            }
+          } else {
+            toolResults.push(...await Promise.all(toolCalls.map(executeOne)));
+          }
+
+          for (const { toolCall, toolContent } of toolResults) {
+            messages.push({ role: 'tool', toolCallId: toolCall.id, content: toolContent });
+          }
+
+          await emit({ ...base(), type: 'turn_end', step });
+          await checkpoint('running', step);
+          continue;
+        }
+
+        if (text) {
+          messages.push({ role: 'assistant', content: text });
+          await emit({ ...base(), type: 'turn_end', step });
+          await checkpoint('completed', step, { result: text });
+          await emit({ ...base(), type: 'run_end', text, steps: step });
+          return { runId, text, steps: step };
+        }
+
+        throw new Error('Provider returned neither text nor a tool call.');
+      }
+
+      throw new Error(`Agent run exceeded max steps: ${maxSteps}`);
+    } catch (error) {
+      if (signal?.aborted) {
+        const reason = signal.reason === undefined
+          ? undefined
+          : signal.reason instanceof Error ? signal.reason.message : String(signal.reason);
+        await checkpoint('cancelled', currentStep, reason ? { error: reason } : {});
+        await emit({
+          ...base(),
+          type: 'run_cancelled',
+          ...(reason === undefined ? {} : { reason }),
+        });
+        throw error;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      await checkpoint('failed', currentStep, { error: message });
+      await emit({
+        ...base(),
+        type: 'run_error',
+        error: message,
+      });
+      throw error;
+    }
+  };
+
   return {
-    async run(prompt, options = {}) {
-      const { onEvent, signal } = options;
-      signal?.throwIfAborted();
+    async run(prompt, runOptions = {}) {
+      runOptions.signal?.throwIfAborted();
       const value = prompt.trim();
       if (!value) {
         throw new Error('Prompt cannot be empty.');
@@ -72,182 +268,37 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
 
       const runId = randomUUID();
       const createdAt = new Date().toISOString();
-      const trace = await createTraceRecorder();
-      const emit = async (event: AgentEvent) => {
-        await trace.record(event);
-        await onEvent?.(event);
-      };
-      const base = () => ({ runId, timestamp: new Date().toISOString() });
-      const checkpoint = async (
-        status: RunStatus,
-        step: number,
-        extras: Pick<RunCheckpoint, 'result' | 'error'> = {},
-      ) => {
-        const task = taskRuntime.getState();
-        await runStore.save({
-          runId,
-          status,
-          prompt: value,
-          step,
-          messages: structuredClone(messages),
-          ...(task ? { task: structuredClone(task) } : {}),
-          ...extras,
-          createdAt,
-          updatedAt: new Date().toISOString(),
-        });
-      };
-
-      await emit({ ...base(), type: 'run_start', prompt: value });
       messages.push({ role: 'user', content: value });
-      await checkpoint('running', 0);
-      let currentStep = 0;
+      return continueRun(runId, value, createdAt, 1, false, runOptions);
+    },
 
-      try {
-        for (let step = 1; step <= maxSteps; step += 1) {
-          currentStep = step;
-          signal?.throwIfAborted();
-          await emit({ ...base(), type: 'turn_start', step });
-
-          const context = buildContext(memory, messages, taskRuntime.getState(), skills.context());
-          const routed = await route?.(context, tools, signal);
-          if (routed) {
-            await emit({ ...base(), type: 'jev_decision', step, decision: { ...routed.decision } });
-          }
-
-          const availableTools = routed?.tools ?? tools;
-          const result = await provider.generate(context, availableTools, signal);
-          const { text, toolCalls, ...metadata } = result;
-
-          await emit({
-            ...base(),
-            type: 'model_result',
-            step,
-            metadata,
-            contextMessages: context.length,
-            ...(toolCalls?.length ? { toolCalls: toolCalls.map(({ name, arguments: arguments_ }) => ({ name, arguments: arguments_ })) } : {}),
-            hasText: Boolean(text),
-          });
-
-          if (toolCalls?.length) {
-            messages.push({ role: 'assistant', toolCalls });
-
-            const executeOne = async (toolCall: (typeof toolCalls)[number]) => {
-              let toolContent: string;
-              let isError = false;
-              try {
-                if (!availableTools.some((tool) => tool.name === toolCall.name)) {
-                  throw new Error('Tool is not available for this step.');
-                }
-                const executionContext: ToolExecutionContext = {
-                  ...(signal ? { signal } : {}),
-                  onExecutionStart: () => emit({ ...base(), type: 'tool_start', step, toolCall }),
-                  ...(requestToolApproval ? {
-                    requestApproval: async (request, approvalSignal) => {
-                      await emit({
-                        ...base(),
-                        type: 'tool_approval_requested',
-                        step,
-                        toolCall,
-                        reason: request.reason,
-                      });
-                      const approved = await requestToolApproval(request, approvalSignal);
-                      await emit({
-                        ...base(),
-                        type: 'tool_approval_resolved',
-                        step,
-                        toolCall,
-                        approved,
-                      });
-                      return approved;
-                    },
-                  } : {}),
-                };
-                const toolResult = await toolRegistry.execute(toolCall, executionContext);
-                toolContent = JSON.stringify({ ok: true, result: toolResult });
-              } catch (error) {
-                if (signal?.aborted) throw signal.reason ?? error;
-                isError = true;
-                if (error instanceof ToolExecutionDeniedError) {
-                  await emit({
-                    ...base(),
-                    type: 'tool_blocked',
-                    step,
-                    toolCall,
-                    reason: error.reason,
-                  });
-                }
-                toolContent = JSON.stringify({
-                  ok: false,
-                  error: error instanceof Error ? error.message : String(error),
-                });
-              }
-
-              await emit({
-                ...base(),
-                type: 'tool_end',
-                step,
-                toolCallId: toolCall.id,
-                name: toolCall.name,
-                result: toolContent,
-                isError,
-              });
-              return { toolCall, toolContent };
-            };
-
-            const sequential = toolCalls.some((toolCall) => toolRegistry.executionMode(toolCall.name) === 'sequential');
-            const toolResults: Array<{ toolCall: (typeof toolCalls)[number]; toolContent: string }> = [];
-
-            if (sequential) {
-              for (const toolCall of toolCalls) {
-                toolResults.push(await executeOne(toolCall));
-              }
-            } else {
-              toolResults.push(...await Promise.all(toolCalls.map(executeOne)));
-            }
-
-            for (const { toolCall, toolContent } of toolResults) {
-              messages.push({ role: 'tool', toolCallId: toolCall.id, content: toolContent });
-            }
-
-            await emit({ ...base(), type: 'turn_end', step });
-            await checkpoint('running', step);
-            continue;
-          }
-
-          if (text) {
-            messages.push({ role: 'assistant', content: text });
-            await emit({ ...base(), type: 'turn_end', step });
-            await checkpoint('completed', step, { result: text });
-            await emit({ ...base(), type: 'run_end', text, steps: step });
-            return { runId, text, steps: step };
-          }
-
-          throw new Error('Provider returned neither text nor a tool call.');
-        }
-
-        throw new Error(`Agent run exceeded max steps: ${maxSteps}`);
-      } catch (error) {
-        if (signal?.aborted) {
-          const reason = signal.reason === undefined
-            ? undefined
-            : signal.reason instanceof Error ? signal.reason.message : String(signal.reason);
-          await checkpoint('cancelled', currentStep, reason ? { error: reason } : {});
-          await emit({
-            ...base(),
-            type: 'run_cancelled',
-            ...(reason === undefined ? {} : { reason }),
-          });
-          throw error;
-        }
-        const message = error instanceof Error ? error.message : String(error);
-        await checkpoint('failed', currentStep, { error: message });
-        await emit({
-          ...base(),
-          type: 'run_error',
-          error: message,
-        });
-        throw error;
+    async resume(runId, runOptions = {}) {
+      runOptions.signal?.throwIfAborted();
+      const checkpoint = await runStore.load(runId);
+      if (!checkpoint) {
+        throw new Error(`Run not found: ${runId}`);
       }
+      if (checkpoint.runId !== runId) {
+        throw new Error('Run checkpoint ID mismatch.');
+      }
+      if (checkpoint.status !== 'running') {
+        throw new Error(`Run is not resumable: ${checkpoint.status}`);
+      }
+
+      messages.splice(0, messages.length, ...structuredClone(checkpoint.messages));
+      taskRuntime.restore(checkpoint.task);
+      runOptions.signal?.throwIfAborted();
+      await skills.restore(checkpoint.skills ?? []);
+      runOptions.signal?.throwIfAborted();
+
+      return continueRun(
+        checkpoint.runId,
+        checkpoint.prompt,
+        checkpoint.createdAt,
+        checkpoint.step + 1,
+        true,
+        runOptions,
+      );
     },
 
     async remember(content) {
