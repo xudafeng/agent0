@@ -13,6 +13,7 @@ export interface RunCheckpoint {
   step: number;
   messages: Message[];
   task?: TaskState;
+  skills?: string[];
   result?: string;
   error?: string;
   createdAt: string;
