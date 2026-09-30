@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { buildContext } from './context.js';
 import type { AgentEvent, AgentEventHandler } from './events.js';
+import { createFileToolExecutionLedger, createToolExecutionId, ToolExecutionUncertainError, type ToolExecutionLedger, type ToolExecutionRecord } from './execution-ledger.js';
 import { createJevRouter } from './jev.js';
 import { loadMemory, remember as persistMemory } from './memory.js';
 import { connectMcpServers } from './mcp.js';
@@ -19,6 +20,7 @@ export interface RuntimeOptions {
   requestToolApproval?: ToolApprovalHandler;
   runStore?: RunStore;
   provider?: Provider;
+  executionLedger?: ToolExecutionLedger;
 }
 
 export interface RunResult {
@@ -47,6 +49,7 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
   const requestToolApproval = options.requestToolApproval;
   const runStore = options.runStore ?? createFileRunStore();
   const provider = options.provider ?? getProvider();
+  const executionLedger = options.executionLedger ?? createFileToolExecutionLedger();
   const route = createJevRouter();
   const messages: Message[] = [];
   const skills = await createSkillRuntime(options.skillDirectories);
@@ -139,16 +142,62 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
         if (toolCalls?.length) {
           messages.push({ role: 'assistant', toolCalls });
 
-          const executeOne = async (toolCall: (typeof toolCalls)[number]) => {
+          const executeOne = async (toolCall: (typeof toolCalls)[number], toolIndex: number) => {
+            if (!availableTools.some((tool) => tool.name === toolCall.name)) {
+              const toolContent = JSON.stringify({ ok: false, error: 'Tool is not available for this step.' });
+              await emit({
+                ...base(),
+                type: 'tool_end',
+                step,
+                toolCallId: toolCall.id,
+                name: toolCall.name,
+                result: toolContent,
+                isError: true,
+              });
+              return { toolCall, toolContent };
+            }
+
+            const executionId = createToolExecutionId(runId, step, toolIndex, toolCall);
+            const idempotency = toolRegistry.idempotency(toolCall.name);
+            const previous = await executionLedger.load(runId, executionId);
+
+            if (previous?.status === 'completed') {
+              if (typeof previous.result !== 'string') {
+                throw new Error(`Completed execution is missing a result: ${executionId}`);
+              }
+              await emit({ ...base(), type: 'tool_reused', step, toolCall, executionId });
+              return { toolCall, toolContent: previous.result };
+            }
+
+            if (previous?.status === 'started' && idempotency !== 'idempotent') {
+              await emit({ ...base(), type: 'tool_execution_uncertain', step, toolCall, executionId });
+              throw new ToolExecutionUncertainError(previous);
+            }
+
             let toolContent: string;
             let isError = false;
+            let executionStarted = false;
+            let startedAt = previous?.startedAt;
             try {
-              if (!availableTools.some((tool) => tool.name === toolCall.name)) {
-                throw new Error('Tool is not available for this step.');
-              }
               const executionContext: ToolExecutionContext = {
                 ...(signal ? { signal } : {}),
-                onExecutionStart: () => emit({ ...base(), type: 'tool_start', step, toolCall }),
+                onExecutionStart: async () => {
+                  executionStarted = true;
+                  startedAt ??= new Date().toISOString();
+                  const record: ToolExecutionRecord = {
+                    executionId,
+                    runId,
+                    step,
+                    toolIndex,
+                    toolCall: structuredClone(toolCall),
+                    idempotency,
+                    status: 'started',
+                    startedAt,
+                    updatedAt: new Date().toISOString(),
+                  };
+                  await executionLedger.save(record);
+                  await emit({ ...base(), type: 'tool_start', step, toolCall });
+                },
                 ...(requestToolApproval ? {
                   requestApproval: async (request, approvalSignal) => {
                     await emit({
@@ -190,6 +239,24 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
               });
             }
 
+            if (executionStarted) {
+              const completedAt = new Date().toISOString();
+              await executionLedger.save({
+                executionId,
+                runId,
+                step,
+                toolIndex,
+                toolCall: structuredClone(toolCall),
+                idempotency,
+                status: 'completed',
+                result: toolContent,
+                isError,
+                startedAt: startedAt!,
+                completedAt,
+                updatedAt: completedAt,
+              });
+            }
+
             await emit({
               ...base(),
               type: 'tool_end',
@@ -206,11 +273,11 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
           const toolResults: Array<{ toolCall: (typeof toolCalls)[number]; toolContent: string }> = [];
 
           if (sequential) {
-            for (const toolCall of toolCalls) {
-              toolResults.push(await executeOne(toolCall));
+            for (const [toolIndex, toolCall] of toolCalls.entries()) {
+              toolResults.push(await executeOne(toolCall, toolIndex));
             }
           } else {
-            toolResults.push(...await Promise.all(toolCalls.map(executeOne)));
+            toolResults.push(...await Promise.all(toolCalls.map((toolCall, toolIndex) => executeOne(toolCall, toolIndex))));
           }
 
           for (const { toolCall, toolContent } of toolResults) {
