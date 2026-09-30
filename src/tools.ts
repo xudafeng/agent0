@@ -91,6 +91,7 @@ export interface ToolRegistry {
   definitions: ToolDefinition[];
   has(name: string): boolean;
   executionMode(name: string): 'parallel' | 'sequential';
+  idempotency(name: string): 'idempotent' | 'non-idempotent' | 'unknown';
   execute(toolCall: ToolCall, context?: ToolExecutionContext): Promise<unknown>;
 }
 
@@ -121,6 +122,9 @@ export function createToolRegistry(agentTools: AgentTool[], policy?: ToolExecuti
     },
     executionMode(name) {
       return registry.get(name)?.executionMode ?? 'parallel';
+    },
+    idempotency(name) {
+      return registry.get(name)?.idempotency ?? 'unknown';
     },
     async execute(toolCall, context = {}) {
       context.signal?.throwIfAborted();
@@ -223,6 +227,7 @@ export const localAgentTools: AgentTool[] = [
         additionalProperties: false,
       },
     },
+    idempotency: 'idempotent',
     execute(toolCall) {
       const { a, b } = requireNumbers(toolCall.arguments);
       return a + b;
@@ -242,6 +247,7 @@ export const localAgentTools: AgentTool[] = [
         additionalProperties: false,
       },
     },
+    idempotency: 'idempotent',
     execute(toolCall) {
       const { a, b } = requireNumbers(toolCall.arguments);
       return a - b;
@@ -261,6 +267,7 @@ export const localAgentTools: AgentTool[] = [
         additionalProperties: false,
       },
     },
+    idempotency: 'idempotent',
     execute(toolCall) {
       const { a, b } = requireNumbers(toolCall.arguments);
       return a * b;
