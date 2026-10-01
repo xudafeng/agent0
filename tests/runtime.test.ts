@@ -358,3 +358,66 @@ test('runtime safely replays a started idempotent tool execution', async (t) => 
   assert.equal(records.get(executionId)?.status, 'completed');
   assert.equal(records.get(executionId)?.result, '{"ok":true,"result":5}');
 });
+
+
+test('failed runs roll back conversation, task, and skill session state', async (t) => {
+  const stable = {
+    messages: [
+      { role: 'user' as const, content: 'stable question' },
+      { role: 'assistant' as const, content: 'stable answer' },
+    ],
+    task: {
+      goal: 'Stable plan',
+      steps: [{ description: 'Keep this', status: 'in_progress' as const }],
+    },
+    skills: [],
+  };
+
+  let calls = 0;
+  const provider: Provider = {
+    async generate() {
+      calls += 1;
+      if (calls === 1) {
+        return {
+          toolCalls: [{
+            id: 'plan-1',
+            name: 'set_plan',
+            arguments: { goal: 'Failed plan', steps: ['Should roll back'] },
+          }],
+          id: 'response-1',
+          model: 'fake',
+          usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+        };
+      }
+      throw new Error('provider failed');
+    },
+  };
+
+  const runStore: RunStore = {
+    async save() {},
+    async load() { return undefined; },
+  };
+  const records = new Map<string, ToolExecutionRecord>();
+  const executionLedger: ToolExecutionLedger = {
+    async load(_runId, executionId) {
+      const record = records.get(executionId);
+      return record ? structuredClone(record) : undefined;
+    },
+    async save(record) {
+      records.set(record.executionId, structuredClone(record));
+    },
+  };
+
+  const runtime = await createAgentRuntime({
+    provider,
+    runStore,
+    executionLedger,
+    skillDirectories: [],
+  });
+  t.after(() => runtime.close());
+  await runtime.restoreSession(stable);
+
+  await assert.rejects(runtime.run('this run should fail'), /provider failed/);
+  assert.deepEqual(runtime.getSessionState(), stable);
+  assert.deepEqual(runtime.getTaskState(), stable.task);
+});

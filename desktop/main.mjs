@@ -10,6 +10,7 @@ import { createSkillRuntime, skillDirectories } from '../dist/skills.js';
 import { jevConfiguration } from '../dist/jev.js';
 import { checkMcpServers, connectMcpServer } from '../dist/mcp.js';
 import { encodeMcpServers, loadMcpServers, mcpConfigKey, validateMcpServers } from '../dist/mcp-config.js';
+import { createFileSessionStore } from '../dist/session-store.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const icon = path.join(root, 'desktop/assets/icon.png');
@@ -23,6 +24,8 @@ let history = [];
 let events = [];
 let configPath;
 let savedMemory = '';
+let sessionStore;
+let pendingSessionState;
 const smokeTest = process.argv.includes('--agent0-smoke-test');
 
 function configuration() {
@@ -44,7 +47,7 @@ function state() {
     arguments: pendingApproval.request.toolCall.arguments,
     reason: pendingApproval.request.reason,
   } : null;
-  return { history, events, busy, approval, config: configuration(), memory: runtime?.getMemory() || savedMemory, task: runtime?.getTaskState() || null };
+  return { history, events, busy, approval, config: configuration(), memory: runtime?.getMemory() || savedMemory, task: runtime?.getTaskState() ?? pendingSessionState?.task ?? null };
 }
 
 function publish(type, data) {
@@ -85,13 +88,33 @@ function requestToolApproval(request, signal) {
 }
 
 async function getRuntime() {
-  runtime ||= await createAgentRuntime({
-    toolPolicy: (toolCall) => toolCall.name.startsWith('mcp_')
-      ? { action: 'ask', reason: 'MCP tool requires approval before execution.' }
-      : { action: 'allow' },
-    requestToolApproval,
-  });
+  if (!runtime) {
+    runtime = await createAgentRuntime({
+      toolPolicy: (toolCall) => toolCall.name.startsWith('mcp_')
+        ? { action: 'ask', reason: 'MCP tool requires approval before execution.' }
+        : { action: 'allow' },
+      requestToolApproval,
+    });
+    if (pendingSessionState) {
+      await runtime.restoreSession(pendingSessionState);
+      pendingSessionState = undefined;
+    }
+  }
   return runtime;
+}
+
+async function clearSession() {
+  pendingSessionState = undefined;
+  await sessionStore?.clear();
+}
+
+async function persistSession(agent) {
+  await sessionStore.save({
+    version: 1,
+    history: structuredClone(history),
+    runtime: agent.getSessionState(),
+    updatedAt: new Date().toISOString(),
+  });
 }
 
 function text(value, name, limit = 32000) {
@@ -135,7 +158,7 @@ handle('skills-list', async () => {
   const directories = skillDirectories();
   if (runtime) return { ...runtime.getSkills(), directories };
   const skills = await createSkillRuntime(directories);
-  return { skills: skills.list(), diagnostics: skills.diagnostics, loaded: [], directories };
+  return { skills: skills.list(), diagnostics: skills.diagnostics, loaded: [...(pendingSessionState?.skills ?? [])], directories };
 });
 handle('jev-save', async (input) => {
   if (!input || typeof input.enabled !== 'boolean' || typeof input.apiKey !== 'string' ||
@@ -159,6 +182,7 @@ handle('jev-save', async (input) => {
   runtime = undefined;
   history = [];
   events = [];
+  await clearSession();
 });
 handle('mcp-list', () => loadMcpServers());
 handle('mcp-pick-directory', async () => {
@@ -191,10 +215,12 @@ handle('mcp-save', async (input) => {
   runtime = undefined;
   history = [];
   events = [];
+  await clearSession();
 });
 handle('send', async (prompt) => {
   const value = text(prompt, 'message');
   const agent = await getRuntime();
+  const historyLength = history.length;
   history.push({ role: 'user', content: value });
   events = [];
   publish('state', state());
@@ -210,11 +236,10 @@ handle('send', async (prompt) => {
       },
     });
     history.push({ role: 'assistant', content: result.text, steps: result.steps });
+    await persistSession(agent);
   } catch (error) {
-    if (!controller.signal.aborted) {
-      history.push({ role: 'error', content: error instanceof Error ? error.message : String(error) });
-      throw error;
-    }
+    history.splice(historyLength);
+    if (!controller.signal.aborted) throw error;
   } finally {
     if (runController === controller) runController = undefined;
   }
@@ -224,6 +249,7 @@ handle('reset', async () => {
   runtime = undefined;
   history = [];
   events = [];
+  await clearSession();
 });
 handle('remember', async (content) => {
   await (await getRuntime()).remember(text(content, 'memory', 4000));
@@ -254,6 +280,7 @@ handle('configure', async (input) => {
   runtime = undefined;
   history = [];
   events = [];
+  await clearSession();
 });
 
 app.whenReady().then(async () => {
@@ -271,6 +298,12 @@ app.whenReady().then(async () => {
   configPath = path.join(dataDirectory, '.env');
   dotenv.config({ path: configPath, override: true, quiet: true });
   savedMemory = await loadMemory();
+  sessionStore = createFileSessionStore();
+  const savedSession = await sessionStore.load();
+  if (savedSession) {
+    history = structuredClone(savedSession.history);
+    pendingSessionState = structuredClone(savedSession.runtime);
+  }
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     { role: 'appMenu' }, { role: 'editMenu' }, { role: 'viewMenu' }, { role: 'windowMenu' },
   ]));
