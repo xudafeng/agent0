@@ -25,6 +25,8 @@ let events = [];
 let configPath;
 let savedMemory = '';
 let sessionStore;
+let sessions = [];
+let activeSessionId;
 let pendingSessionState;
 const smokeTest = process.argv.includes('--agent0-smoke-test');
 
@@ -47,7 +49,7 @@ function state() {
     arguments: pendingApproval.request.toolCall.arguments,
     reason: pendingApproval.request.reason,
   } : null;
-  return { history, events, busy, approval, config: configuration(), memory: runtime?.getMemory() || savedMemory, task: runtime?.getTaskState() ?? pendingSessionState?.task ?? null };
+  return { history, events, busy, approval, sessions, activeSessionId, config: configuration(), memory: runtime?.getMemory() || savedMemory, task: runtime?.getTaskState() ?? pendingSessionState?.task ?? null };
 }
 
 function publish(type, data) {
@@ -103,18 +105,45 @@ async function getRuntime() {
   return runtime;
 }
 
-async function clearSession() {
+async function refreshSessions() {
+  sessions = await sessionStore.list();
+}
+
+async function activateSession(id) {
+  const snapshot = await sessionStore.load(id);
+  await sessionStore.setActive(id);
+
+  await runtime?.close();
+  runtime = undefined;
   pendingSessionState = undefined;
-  await sessionStore?.clear();
+  history = snapshot ? structuredClone(snapshot.history) : [];
+  pendingSessionState = snapshot ? structuredClone(snapshot.runtime) : undefined;
+  events = [];
+
+  activeSessionId = id;
+  await refreshSessions();
+}
+
+async function createSession(title = 'New conversation') {
+  const session = await sessionStore.create(title);
+  await activateSession(session.id);
+  return session;
 }
 
 async function persistSession(agent) {
-  await sessionStore.save({
+  if (!activeSessionId) throw new Error('No active session.');
+  await sessionStore.save(activeSessionId, {
     version: 1,
     history: structuredClone(history),
     runtime: agent.getSessionState(),
     updatedAt: new Date().toISOString(),
   });
+  const active = sessions.find((session) => session.id === activeSessionId);
+  if (active?.title === 'New conversation') {
+    const firstUser = history.find((message) => message.role === 'user')?.content.trim();
+    if (firstUser) await sessionStore.rename(activeSessionId, firstUser.slice(0, 48));
+  }
+  await refreshSessions();
 }
 
 function text(value, name, limit = 32000) {
@@ -154,6 +183,44 @@ ipcMain.handle('agent:approval-resolve', (event, input) => {
 });
 
 handle('state', state);
+handle('session-create', async (title) => {
+  if (title !== undefined && typeof title !== 'string') throw new Error('Invalid session title.');
+  return createSession(title?.trim() || 'New conversation');
+});
+handle('session-switch', async (id) => {
+  if (typeof id !== 'string') throw new Error('Invalid session ID.');
+  await activateSession(id);
+});
+handle('session-rename', async (input) => {
+  if (!input || typeof input.id !== 'string' || typeof input.title !== 'string') throw new Error('Invalid session rename.');
+  await sessionStore.rename(input.id, input.title);
+  await refreshSessions();
+});
+handle('session-delete', async (id) => {
+  if (typeof id !== 'string') throw new Error('Invalid session ID.');
+  const deletingActive = id === activeSessionId;
+  if (deletingActive) {
+    await runtime?.close();
+    runtime = undefined;
+    pendingSessionState = undefined;
+  }
+
+  await sessionStore.remove(id);
+  await refreshSessions();
+
+  if (!deletingActive) return;
+
+  activeSessionId = await sessionStore.active();
+  if (!activeSessionId) {
+    const created = await sessionStore.create();
+    activeSessionId = created.id;
+    await refreshSessions();
+  }
+  const snapshot = await sessionStore.load(activeSessionId);
+  history = snapshot ? structuredClone(snapshot.history) : [];
+  pendingSessionState = snapshot ? structuredClone(snapshot.runtime) : undefined;
+  events = [];
+});
 handle('skills-list', async () => {
   const directories = skillDirectories();
   if (runtime) return { ...runtime.getSkills(), directories };
@@ -180,9 +247,7 @@ handle('jev-save', async (input) => {
   Object.assign(process.env, values);
   await runtime?.close();
   runtime = undefined;
-  history = [];
-  events = [];
-  await clearSession();
+  await createSession();
 });
 handle('mcp-list', () => loadMcpServers());
 handle('mcp-pick-directory', async () => {
@@ -213,9 +278,7 @@ handle('mcp-save', async (input) => {
   process.env[mcpConfigKey] = encoded;
   await runtime?.close();
   runtime = undefined;
-  history = [];
-  events = [];
-  await clearSession();
+  await createSession();
 });
 handle('send', async (prompt) => {
   const value = text(prompt, 'message');
@@ -245,11 +308,7 @@ handle('send', async (prompt) => {
   }
 });
 handle('reset', async () => {
-  await runtime?.close();
-  runtime = undefined;
-  history = [];
-  events = [];
-  await clearSession();
+  await createSession();
 });
 handle('remember', async (content) => {
   await (await getRuntime()).remember(text(content, 'memory', 4000));
@@ -278,9 +337,7 @@ handle('configure', async (input) => {
   Object.assign(process.env, values);
   await runtime?.close();
   runtime = undefined;
-  history = [];
-  events = [];
-  await clearSession();
+  await createSession();
 });
 
 app.whenReady().then(async () => {
@@ -299,7 +356,14 @@ app.whenReady().then(async () => {
   dotenv.config({ path: configPath, override: true, quiet: true });
   savedMemory = await loadMemory();
   sessionStore = createFileSessionStore();
-  const savedSession = await sessionStore.load();
+  await refreshSessions();
+  activeSessionId = await sessionStore.active();
+  if (!activeSessionId) {
+    const created = await sessionStore.create();
+    activeSessionId = created.id;
+    await refreshSessions();
+  }
+  const savedSession = await sessionStore.load(activeSessionId);
   if (savedSession) {
     history = structuredClone(savedSession.history);
     pendingSessionState = structuredClone(savedSession.runtime);

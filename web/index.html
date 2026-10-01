@@ -11,13 +11,13 @@
   <aside class="sidebar">
     <div class="brand"><span class="brand-mark">a<span>0</span></span><strong>agent0</strong><span class="version" data-i18n="DESKTOP">DESKTOP</span></div>
     <button id="new-chat" class="new-chat"><span>＋</span> <span data-i18n="New conversation">New conversation</span> <kbd>⌘ N</kbd></button>
-    <div class="section-label" data-i18n="WORKSPACE">WORKSPACE</div>
-    <div class="nav-item active"><span>◈</span> <span data-i18n="Conversation">Conversation</span> <span class="nav-dot"></span></div>
+    <div class="section-label" data-i18n="CONVERSATIONS">CONVERSATIONS</div>
+    <div id="session-list" class="session-list" aria-label="Conversations" data-i18n-aria-label="Conversations"></div>
     <div class="session-note"><span data-i18n="Your space to think,">Your space to think,</span><br><span data-i18n="plan, and get things done.">plan, and get things done.</span></div>
     <div class="sidebar-bottom"><label class="language-control"><span data-i18n="Language">Language</span><select data-language aria-label="Language" data-i18n-aria-label="Language"><option value="en">English</option><option value="zh">简体中文</option></select></label><div class="local-label"><span class="dot"></span> <span data-i18n="Runs on your computer">Runs on your computer</span></div><button id="jev-button" class="settings-button"><span>◈</span><span data-i18n="Jev routing">Jev routing</span><span id="jev-status"></span></button><button id="skills-button" class="settings-button"><span>✳</span><span data-i18n="Skills">Skills</span><span>↗</span></button><button id="mcp-button" class="settings-button"><span>◇</span><span data-i18n="MCP servers">MCP servers</span><span>↗</span></button><button id="settings-button" class="settings-button">⚙ <span data-i18n="Model settings">Model settings</span><span>↗</span></button></div>
   </aside>
   <main>
-    <header><div><span class="breadcrumb" data-i18n="Workspace /">Workspace /</span> <span data-i18n="Conversation">Conversation</span></div><div class="connection"><span class="dot" id="status-dot"></span><span id="connection-label" data-i18n="Ready">Ready</span></div></header>
+    <header><div><span class="breadcrumb" data-i18n="Workspace /">Workspace /</span> <span id="active-session-title" data-i18n="Conversation">Conversation</span></div><div class="connection"><span class="dot" id="status-dot"></span><span id="connection-label" data-i18n="Ready">Ready</span></div></header>
     <div id="messages" class="messages" aria-live="polite">
       <section id="welcome" class="welcome"><div class="hero-mark">a<span>0</span></div><div class="eyebrow" data-i18n="A LITTLE HELP. A LOT OF POSSIBILITY.">A LITTLE HELP. A LOT OF POSSIBILITY.</div><h1 data-i18n="What are we working on?">What are we working on?</h1><p><span data-i18n="Bring an idea, a question, or a task.">Bring an idea, a question, or a task.</span><br><span data-i18n="Your agent will take it from here.">Your agent will take it from here.</span></p><div class="jev-feature">
         <div class="jev-feature-heading"><span class="jev-feature-badge">Jev</span><span class="jev-feature-kicker" data-i18n="SMART TOOL ROUTING">SMART TOOL ROUTING</span></div>
