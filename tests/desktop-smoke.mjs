@@ -284,6 +284,11 @@ try {
   await evaluate('window.agent0.remember(\'Prefer concise answers\')');
   const before = await evaluate('window.agent0.state()');
   assert.ok(before.memory.includes('Prefer concise answers'));
+  const persistedSession = JSON.parse(await readFile(join(profile, 'data/session.json'), 'utf8'));
+  assert.deepEqual(persistedSession.history, before.history);
+  assert.equal(persistedSession.runtime.task.goal, 'Desktop verification');
+  assert.deepEqual(persistedSession.runtime.skills, ['desktop-check']);
+  assert.ok(persistedSession.runtime.messages.some((message) => message.role === 'assistant' && message.content === 'Desktop integration works. Your agent is ready.'));
   await evaluate('window.agent0.mcpCheck()');
   assert.deepEqual((await evaluate('window.agent0.state()')).history, before.history);
   await evaluate('document.getElementById(\'prompt\').value = \'Keep this draft\'');
@@ -308,6 +313,7 @@ try {
   assert.equal(after.task, null);
   assert.deepEqual((await evaluate('window.agent0.skillsList()')).loaded, []);
   assert.ok(after.memory.includes('Prefer concise answers'));
+  await assert.rejects(readFile(join(profile, 'data/session.json'), 'utf8'), (error) => error.code === 'ENOENT');
   await evaluate('document.getElementById(\'mcp-button\').click()');
   await waitFor('document.getElementById(\'mcp-id\').value === \'smoke\' && !document.getElementById(\'mcp-save\').disabled');
   await evaluate('document.querySelector(\'[data-server-id="remote"] .mcp-server-name\').click()');

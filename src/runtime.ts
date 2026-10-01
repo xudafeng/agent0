@@ -34,6 +34,12 @@ export interface RunOptions {
   signal?: AbortSignal;
 }
 
+export interface RuntimeSessionState {
+  messages: Message[];
+  task?: TaskState;
+  skills: string[];
+}
+
 export interface AgentRuntime {
   run(prompt: string, options?: RunOptions): Promise<RunResult>;
   resume(runId: string, options?: RunOptions): Promise<RunResult>;
@@ -41,6 +47,8 @@ export interface AgentRuntime {
   getMemory(): string;
   getTaskState(): TaskState | undefined;
   getSkills(): { skills: SkillSummary[]; diagnostics: string[]; loaded: string[] };
+  getSessionState(): RuntimeSessionState;
+  restoreSession(state: RuntimeSessionState): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -65,6 +73,21 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
   ], options.toolPolicy);
   const tools = toolRegistry.definitions;
   let memory = await loadMemory();
+
+  const getSessionState = (): RuntimeSessionState => {
+    const task = taskRuntime.getState();
+    return {
+      messages: structuredClone(messages),
+      ...(task ? { task: structuredClone(task) } : {}),
+      skills: [...skills.loaded()],
+    };
+  };
+
+  const restoreSessionState = async (state: RuntimeSessionState): Promise<void> => {
+    messages.splice(0, messages.length, ...structuredClone(state.messages));
+    taskRuntime.restore(state.task);
+    await skills.restore([...state.skills]);
+  };
 
   const continueRun = async (
     runId: string,
@@ -335,8 +358,14 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
 
       const runId = randomUUID();
       const createdAt = new Date().toISOString();
+      const before = getSessionState();
       messages.push({ role: 'user', content: value });
-      return continueRun(runId, value, createdAt, 1, false, runOptions);
+      try {
+        return await continueRun(runId, value, createdAt, 1, false, runOptions);
+      } catch (error) {
+        await restoreSessionState(before);
+        throw error;
+      }
     },
 
     async resume(runId, runOptions = {}) {
@@ -383,6 +412,12 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
 
     getSkills() {
       return { skills: skills.list(), diagnostics: [...skills.diagnostics], loaded: skills.loaded() };
+    },
+
+    getSessionState,
+
+    async restoreSession(state) {
+      await restoreSessionState(state);
     },
 
     async close() {
