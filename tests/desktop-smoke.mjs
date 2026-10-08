@@ -284,11 +284,43 @@ try {
   await evaluate('window.agent0.remember(\'Prefer concise answers\')');
   const before = await evaluate('window.agent0.state()');
   assert.ok(before.memory.includes('Prefer concise answers'));
-  const persistedSession = JSON.parse(await readFile(join(profile, 'data/session.json'), 'utf8'));
+  assert.equal(before.sessions.length, 1);
+  const firstSessionId = before.activeSessionId;
+  assert.ok(firstSessionId);
+  assert.equal(before.sessions[0].title, 'Create a plan');
+  const sessionIndex = JSON.parse(await readFile(join(profile, 'data/sessions/index.json'), 'utf8'));
+  assert.equal(sessionIndex.activeSessionId, firstSessionId);
+  const persistedSession = JSON.parse(await readFile(join(profile, `data/sessions/${firstSessionId}.json`), 'utf8'));
   assert.deepEqual(persistedSession.history, before.history);
   assert.equal(persistedSession.runtime.task.goal, 'Desktop verification');
   assert.deepEqual(persistedSession.runtime.skills, ['desktop-check']);
   assert.ok(persistedSession.runtime.messages.some((message) => message.role === 'assistant' && message.content === 'Desktop integration works. Your agent is ready.'));
+
+  const secondSession = await evaluate('window.agent0.createSession("English")');
+  let secondState = await evaluate('window.agent0.state()');
+  assert.equal(secondState.activeSessionId, secondSession.id);
+  assert.equal(secondState.history.length, 0);
+  assert.equal(secondState.task, null);
+  assert.equal(secondState.sessions.length, 2);
+  assert.equal(await evaluate('document.querySelectorAll(".session-item").length'), 2);
+  assert.equal(await evaluate(`document.querySelector('[data-session-id="${secondSession.id}"]').classList.contains('active')`), true);
+  assert.deepEqual((await evaluate('window.agent0.skillsList()')).loaded, []);
+
+  await evaluate(`window.agent0.switchSession(${JSON.stringify(firstSessionId)})`);
+  await waitFor('document.getElementById(\'conversation\').textContent.includes(\'Desktop integration works\')');
+  const restoredFirst = await evaluate('window.agent0.state()');
+  assert.equal(restoredFirst.activeSessionId, firstSessionId);
+  assert.deepEqual(restoredFirst.history, before.history);
+  assert.equal(restoredFirst.task.goal, 'Desktop verification');
+  assert.equal(await evaluate(`document.querySelector('[data-session-id="${firstSessionId}"]').classList.contains('active')`), true);
+  assert.deepEqual((await evaluate('window.agent0.skillsList()')).loaded, ['desktop-check']);
+
+  await evaluate(`window.agent0.renameSession(${JSON.stringify(secondSession.id)}, 'English practice')`);
+  await waitFor(`document.querySelector('[data-session-id="${secondSession.id}"] .session-open')?.textContent === 'English practice'`);
+  assert.equal((await evaluate('window.agent0.state()')).sessions.find((session) => session.id === secondSession.id).title, 'English practice');
+  await evaluate(`window.agent0.deleteSession(${JSON.stringify(secondSession.id)})`);
+  assert.equal((await evaluate('window.agent0.state()')).sessions.length, 1);
+
   await evaluate('window.agent0.mcpCheck()');
   assert.deepEqual((await evaluate('window.agent0.state()')).history, before.history);
   await evaluate('document.getElementById(\'prompt\').value = \'Keep this draft\'');
@@ -296,11 +328,11 @@ try {
   assert.ok(await evaluate('document.querySelector(\'.message-meta\').textContent.includes(\'个步骤\')'));
   await switchLanguage('en');
   assert.equal(await evaluate('document.querySelector(\'.message.user .message-name\').textContent'), 'You');
-  assert.ok(await evaluate('document.getElementById(\'activity\').textContent.includes(\'returned\')'));
+  assert.ok(await evaluate('document.getElementById(\'activity\').textContent.includes(\'Tool calls and progress\')'));
   assert.equal(await evaluate('document.getElementById(\'prompt\').value'), 'Keep this draft');
   assert.deepEqual((await evaluate('window.agent0.state()')).history, before.history);
   await switchLanguage('zh');
-  assert.ok(await evaluate('document.getElementById(\'activity\').textContent.includes(\'已返回结果\')'));
+  assert.ok(await evaluate('document.getElementById(\'activity\').textContent.includes(\'实时展示工具调用与进度。\')'));
   window.reload();
   await new Promise((resolve) => window.webContents.once('did-finish-load', resolve));
   await waitFor('document.getElementById(\'conversation\').textContent.includes(\'Desktop integration works\')');
@@ -313,7 +345,11 @@ try {
   assert.equal(after.task, null);
   assert.deepEqual((await evaluate('window.agent0.skillsList()')).loaded, []);
   assert.ok(after.memory.includes('Prefer concise answers'));
-  await assert.rejects(readFile(join(profile, 'data/session.json'), 'utf8'), (error) => error.code === 'ENOENT');
+  assert.equal(after.sessions.length, 2);
+  assert.notEqual(after.activeSessionId, firstSessionId);
+  assert.equal(after.sessions.some((session) => session.id === firstSessionId), true);
+  const preservedFirst = JSON.parse(await readFile(join(profile, `data/sessions/${firstSessionId}.json`), 'utf8'));
+  assert.deepEqual(preservedFirst.history, before.history);
   await evaluate('document.getElementById(\'mcp-button\').click()');
   await waitFor('document.getElementById(\'mcp-id\').value === \'smoke\' && !document.getElementById(\'mcp-save\').disabled');
   await evaluate('document.querySelector(\'[data-server-id="remote"] .mcp-server-name\').click()');

@@ -8,6 +8,7 @@ const api = window.agent0;
 let current;
 let sending = false;
 let renderedHistory = '';
+let renderedSessions = '';
 let progressEvent;
 let keepSavedKey = false;
 
@@ -30,6 +31,87 @@ function showError(error, target = 'error') {
   $(target).hidden = false;
 }
 
+async function switchSession(id) {
+  if (current?.busy || sending || id === current?.activeSessionId) return;
+  await api.switchSession(id);
+  renderedHistory = '';
+  progressEvent = undefined;
+  render(await api.state());
+  $('prompt').focus();
+}
+
+async function renameSession(session, row) {
+  if (current?.busy || sending) return;
+  const input = element('input', 'session-title-input');
+  input.value = session.title;
+  input.maxLength = 120;
+  row.replaceChildren(input);
+  input.focus();
+  input.select();
+
+  let finished = false;
+  const finish = async (save) => {
+    if (finished) return;
+    finished = true;
+    const title = input.value.trim();
+    if (save && title && title !== session.title) {
+      try { await api.renameSession(session.id, title); }
+      catch (error) { showError(error); }
+    }
+    renderedSessions = '';
+    render(await api.state());
+  };
+  input.onkeydown = (event) => {
+    if (event.key === 'Enter') { event.preventDefault(); void finish(true); }
+    if (event.key === 'Escape') { event.preventDefault(); void finish(false); }
+  };
+  input.onblur = () => void finish(true);
+}
+
+function renderSessions(state, locked) {
+  const snapshot = JSON.stringify([state.sessions, state.activeSessionId, locked]);
+  if (snapshot === renderedSessions) return;
+  renderedSessions = snapshot;
+  const rows = state.sessions.map((session) => {
+    const row = element('div', `session-item${session.id === state.activeSessionId ? ' active' : ''}`);
+    row.dataset.sessionId = session.id;
+
+    const open = element('button', 'session-open', session.title);
+    open.type = 'button';
+    open.title = session.title;
+    open.disabled = locked;
+    open.onclick = () => void switchSession(session.id);
+
+    const rename = element('button', 'session-action', '✎');
+    rename.type = 'button';
+    rename.title = t('Rename conversation');
+    rename.setAttribute('aria-label', t('Rename conversation'));
+    rename.disabled = locked;
+    rename.onclick = () => void renameSession(session, row);
+
+    const remove = element('button', 'session-action', '×');
+    remove.type = 'button';
+    remove.title = t('Delete conversation');
+    remove.setAttribute('aria-label', t('Delete conversation'));
+    remove.disabled = locked;
+    remove.onclick = async () => {
+      try {
+        await api.deleteSession(session.id);
+        renderedHistory = '';
+        progressEvent = undefined;
+        renderedSessions = '';
+        render(await api.state());
+      } catch (error) { showError(error); }
+    };
+
+    row.append(open, rename, remove);
+    return row;
+  });
+  $('session-list').replaceChildren(...rows);
+  const active = state.sessions.find((session) => session.id === state.activeSessionId);
+  $('active-session-title').textContent = active?.title || t('Conversation');
+}
+
 function render(state) {
   current = state;
   const { config, history, busy, task, memory, events, approval } = state;
@@ -43,6 +125,7 @@ function render(state) {
   $('stop').hidden = !busy;
   $('stop').disabled = !busy;
   $('new-chat').disabled = locked;
+  renderSessions(state, locked);
   $('settings-button').disabled = locked;
   $('memory-input').disabled = locked;
   $('memory-form').querySelector('button').disabled = locked;
@@ -128,6 +211,7 @@ function renderProgress() {
 for (const select of document.querySelectorAll('[data-language]')) select.onchange = () => {
   setLanguage(select.value);
   renderedHistory = '';
+  renderedSessions = '';
   delete $('activity').dataset.snapshot;
   if (current) render(current);
   renderProgress();
@@ -198,11 +282,21 @@ $('prompt').onkeydown = (event) => {
   }
 };
 for (const button of document.querySelectorAll('[data-prompt]')) button.onclick = () => { $('prompt').value = button.dataset.prompt; $('prompt').oninput(); $('prompt').focus(); };
-$('new-chat').onclick = () => $('reset-dialog').showModal();
+$('new-chat').onclick = async () => {
+  try {
+    await api.createSession();
+    renderedHistory = '';
+    renderedSessions = '';
+    progressEvent = undefined;
+    $('error').hidden = true;
+    render(await api.state());
+    $('prompt').focus();
+  } catch (error) { showError(error); }
+};
 $('cancel-reset').onclick = () => $('reset-dialog').close();
 $('confirm-reset').onclick = async () => {
   $('reset-dialog').close();
-  try { await api.reset(); $('error').hidden = true; $('prompt').focus(); } catch (error) { showError(error); }
+  $('new-chat').click();
 };
 document.addEventListener('keydown', (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key === 'n') { event.preventDefault(); if (!current?.busy) $('new-chat').click(); }

@@ -2,6 +2,10 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('agent0', {
   state: () => ipcRenderer.invoke('agent:state'),
+  createSession: (title) => ipcRenderer.invoke('agent:session-create', title),
+  switchSession: (id) => ipcRenderer.invoke('agent:session-switch', id),
+  renameSession: (id, title) => ipcRenderer.invoke('agent:session-rename', { id, title }),
+  deleteSession: (id) => ipcRenderer.invoke('agent:session-delete', id),
   skillsList: () => ipcRenderer.invoke('agent:skills-list'),
   send: (prompt) => ipcRenderer.invoke('agent:send', prompt),
   abort: () => ipcRenderer.invoke('agent:abort'),
