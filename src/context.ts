@@ -26,11 +26,18 @@ function selectRecentConversation(messages: Message[]): Message[] {
   return messages.slice(startIndex);
 }
 
-export function buildContext(memory: string, messages: Message[], taskState?: TaskState, skillContext = ''): Message[] {
+export function buildContext(
+  memory: string,
+  messages: Message[],
+  taskState?: TaskState,
+  skillContext = '',
+  computerContext = '',
+): Message[] {
   const selectedMemory = selectMemory(memory);
   const recentConversation = selectRecentConversation(messages);
   const task = formatTaskState(taskState);
   const systemSections = [
+    computerContext,
     skillContext,
     selectedMemory ? `Relevant persistent memory:\n\n${selectedMemory}` : '',
     task ? `Current task state:\n\n${task}` : '',
