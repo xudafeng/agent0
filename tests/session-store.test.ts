@@ -47,6 +47,30 @@ test('file session store creates, switches, renames, and deletes isolated sessio
   assert.equal(renamed.title, 'Agent0 study');
   assert.equal((await store.list()).find((session) => session.id === first.id)?.title, 'Agent0 study');
 
+  const bound = await store.bindComputer(first.id, 'workspace-1', {
+    backend: 'e2b',
+    id: 'sandbox-1',
+    workspaceId: 'workspace-1',
+  });
+  assert.equal(bound.workspaceId, 'workspace-1');
+  assert.deepEqual(bound.computerRef, {
+    backend: 'e2b',
+    id: 'sandbox-1',
+    workspaceId: 'workspace-1',
+  });
+  assert.deepEqual(
+    (await store.list()).find((session) => session.id === first.id)?.computerRef,
+    bound.computerRef,
+  );
+  await assert.rejects(
+    store.bindComputer(first.id, 'workspace-1', {
+      backend: 'e2b',
+      id: 'sandbox-bad',
+      workspaceId: '../escape',
+    }),
+    /Invalid session computer binding/,
+  );
+
   await store.remove(first.id);
   assert.equal(await store.active(), second.id);
   assert.equal(await store.load(first.id), undefined);
