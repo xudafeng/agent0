@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { Computer } from './computer.js';
+import type { Computer, ComputerExecInput } from './computer.js';
 import type { AgentTool } from './tools.js';
 
 const computerExecSchema = z.object({
@@ -46,7 +46,14 @@ export function createComputerTools(computer: Computer): AgentTool[] {
       executionMode: 'sequential',
       idempotency: 'non-idempotent',
       execute(toolCall, context) {
-        const input = computerExecSchema.parse(toolCall.arguments);
+        const parsed = computerExecSchema.parse(toolCall.arguments);
+        const input: ComputerExecInput = {
+          command: parsed.command,
+          ...(parsed.args === undefined ? {} : { args: parsed.args }),
+          ...(parsed.cwd === undefined ? {} : { cwd: parsed.cwd }),
+          ...(parsed.env === undefined ? {} : { env: parsed.env }),
+          ...(parsed.timeoutMs === undefined ? {} : { timeoutMs: parsed.timeoutMs }),
+        };
         return computer.exec(input, context.signal);
       },
     },
