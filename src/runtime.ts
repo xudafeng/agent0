@@ -53,7 +53,7 @@ export interface AgentRuntime {
 }
 
 export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<AgentRuntime> {
-  const maxSteps = options.maxSteps ?? 8;
+  const maxSteps = options.maxSteps ?? 16;
   const requestToolApproval = options.requestToolApproval;
   const runStore = options.runStore ?? createFileRunStore();
   const provider = options.provider ?? getProvider();
