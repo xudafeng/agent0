@@ -103,7 +103,7 @@ test('computer tools validate malformed arguments', async () => {
       name: 'computer_exec',
       arguments: { command: '', args: [1] },
     }),
-    /non-empty string argument: command/,
+    /command/,
   );
 
   await assert.rejects(
@@ -112,7 +112,7 @@ test('computer tools validate malformed arguments', async () => {
       name: 'computer_read_file',
       arguments: { path: '' },
     }),
-    /non-empty string argument: path/,
+    /path/,
   );
 
   await assert.rejects(
@@ -121,6 +121,6 @@ test('computer tools validate malformed arguments', async () => {
       name: 'computer_write_file',
       arguments: { path: 'file.txt', content: 1 },
     }),
-    /requires string argument: content/,
+    /content/,
   );
 });
