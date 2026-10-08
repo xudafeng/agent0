@@ -146,7 +146,10 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
         signal?.throwIfAborted();
         await emit({ ...base(), type: 'turn_start', step });
 
-        const context = buildContext(memory, messages, taskRuntime.getState(), skills.context());
+        const computerContext = options.computer
+          ? `Current computer: ${options.computer.ref.backend} backend, workspace ${options.computer.ref.workspaceId}. Use the computer_* tools to execute commands and access files in this computer. E2B is a computer backend, not a skill.`
+          : '';
+        const context = buildContext(memory, messages, taskRuntime.getState(), skills.context(), computerContext);
         const routed = await route?.(context, tools, signal);
         if (routed) {
           await emit({ ...base(), type: 'jev_decision', step, decision: { ...routed.decision } });
