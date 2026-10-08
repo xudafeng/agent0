@@ -41,7 +41,7 @@ test('computer tools expose exec, read, and write operations', async () => {
 
   assert.deepEqual(
     registry.definitions.map((tool) => tool.name),
-    ['computer_exec', 'computer_read_file', 'computer_write_file'],
+    ['computer_exec', 'computer_read_file', 'computer_start_process', 'computer_process_status', 'computer_process_output', 'computer_write_file'],
   );
 
   assert.deepEqual(
