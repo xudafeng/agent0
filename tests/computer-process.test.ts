@@ -91,7 +91,9 @@ test('detached process keeps a durable handle and captured output paths', async 
   assert.ok(launcher);
   assert.equal(launcher.cwd, 'app');
   assert.deepEqual(launcher.env, { MODE: 'test' });
-  assert.ok(launcher.args?.[1]?.includes("'node' 'worker.js'"));
+  assert.ok(launcher.args?.[1]?.includes('node'));
+  assert.ok(launcher.args?.[1]?.includes('worker.js'));
+  assert.ok(launcher.args?.[1]?.includes('nohup sh -lc'));
 });
 
 test('detached process status survives reconnect through workspace files', async () => {
