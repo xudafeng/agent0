@@ -144,6 +144,76 @@ button {
   margin: 32px 10px 12px;
 }
 
+.session-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: min(34vh, 280px);
+  overflow-y: auto;
+  margin: 0 -4px;
+  padding: 0 4px;
+  -webkit-app-region: no-drag;
+}
+
+.session-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 24px 24px;
+  align-items: center;
+  gap: 2px;
+  border-radius: 7px;
+  padding: 3px;
+}
+
+.session-item:hover,
+.session-item.active {
+  background: #e6e9ed;
+}
+
+.session-open {
+  min-width: 0;
+  padding: 7px 6px;
+  text-align: left;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11px;
+}
+
+.session-item.active .session-open {
+  font-weight: 600;
+  color: #2c5744;
+}
+
+.session-action {
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  color: #8a939e;
+  font-size: 11px;
+  opacity: 0;
+}
+
+.session-item:hover .session-action,
+.session-item.active .session-action,
+.session-action:focus-visible {
+  opacity: 1;
+}
+
+.session-action:hover {
+  background: #dadddf;
+  color: #435048;
+}
+
+.session-title-input {
+  grid-column: 1 / -1;
+  width: 100%;
+  border: 1px solid #aeb8b1;
+  border-radius: 6px;
+  padding: 6px 7px;
+  background: white;
+  font-size: 11px;
+}
+
 .nav-item {
   display: flex;
   align-items: center;
