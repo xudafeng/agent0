@@ -47,11 +47,12 @@ function positiveNumberArg(toolCall: ToolCall, name: string): number | undefined
 }
 
 export function createComputerTools(computer: Computer): AgentTool[] {
+  const backend = computer.ref.backend;
   return [
     {
       definition: {
         name: 'computer_exec',
-        description: 'Run a command inside the current computer workspace. Paths are relative to the workspace unless cwd is omitted.',
+        description: `Run a command inside the current ${backend} computer workspace. If the backend is e2b, this command runs in the E2B sandbox. Paths are relative to the workspace unless cwd is omitted.`,
         parameters: {
           type: 'object',
           properties: {
@@ -88,7 +89,7 @@ export function createComputerTools(computer: Computer): AgentTool[] {
     {
       definition: {
         name: 'computer_read_file',
-        description: 'Read a UTF-8 text file from the current computer workspace.',
+        description: `Read a UTF-8 text file from the current ${backend} computer workspace.`,
         parameters: {
           type: 'object',
           properties: {
@@ -107,7 +108,7 @@ export function createComputerTools(computer: Computer): AgentTool[] {
     {
       definition: {
         name: 'computer_write_file',
-        description: 'Write a UTF-8 text file inside the current computer workspace, creating parent directories when needed.',
+        description: `Write a UTF-8 text file inside the current ${backend} computer workspace, creating parent directories when needed.`,
         parameters: {
           type: 'object',
           properties: {
