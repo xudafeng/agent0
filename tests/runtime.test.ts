@@ -582,3 +582,63 @@ test('runtime executes injected computer tools and feeds results back to the mod
   assert.deepEqual(computerCalls, [{ command: 'pwd' }]);
 });
 
+test('runtime tells the model that E2B is the active computer backend', async (t) => {
+  const computer: import('../src/computer.js').Computer = {
+    ref: { backend: 'e2b', id: 'sandbox-1', workspaceId: 'workspace-1' },
+    capabilities: {
+      persistentFilesystem: true,
+      persistentMemory: true,
+      pauseResume: true,
+      snapshot: false,
+      fork: false,
+      desktop: false,
+    },
+    async exec() { return { exitCode: 0, stdout: '', stderr: '' }; },
+    async readTextFile() { return ''; },
+    async writeTextFile() {},
+    async suspend() {},
+    async resume() {},
+    async snapshot() { throw new Error('unsupported'); },
+    async destroy() {},
+  };
+
+  let seenMessages: Message[] = [];
+  let seenTools: import('../src/tools.js').ToolDefinition[] = [];
+  const provider: Provider = {
+    async generate(messages, tools = []) {
+      seenMessages = structuredClone(messages);
+      seenTools = structuredClone(tools);
+      return {
+        text: 'ready',
+        id: 'response-1',
+        model: 'fake',
+        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      };
+    },
+  };
+
+  const runtime = await createAgentRuntime({
+    provider,
+    computer,
+    runStore: {
+      async save() {},
+      async load() { return undefined; },
+    },
+    executionLedger: {
+      async load() { return undefined; },
+      async save() {},
+    },
+    skillDirectories: [],
+  });
+  t.after(() => runtime.close());
+
+  await runtime.run('run ls in E2B');
+  const system = seenMessages.find((message) => message.role === 'system');
+  assert.ok(system && 'content' in system);
+  assert.ok(system.content.includes('Current computer: e2b backend'));
+  assert.ok(system.content.includes('E2B is a computer backend, not a skill.'));
+  assert.ok(
+    seenTools.find((tool) => tool.name === 'computer_exec')?.description.includes('E2B sandbox'),
+  );
+});
+
