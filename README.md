@@ -131,3 +131,23 @@ pnpm eval
 ```
 
 The desktop smoke test uses an isolated temporary profile and a local mock model endpoint; it does not use your API keys. Evaluation calls your configured real model.
+
+## Computer backend
+
+Agent0 can bind each conversation to a persistent computer workspace.
+
+Local computer:
+
+```bash
+AGENT0_COMPUTER=local
+```
+
+E2B cloud sandbox:
+
+```bash
+AGENT0_COMPUTER=e2b
+E2B_API_KEY=your_e2b_api_key
+```
+
+When E2B is enabled, the first runtime use of a conversation creates a sandbox and immediately persists its `ComputerRef`. Switching away pauses the sandbox with memory preserved; reopening the conversation or restarting Agent0 reconnects to the same sandbox and workspace.
+

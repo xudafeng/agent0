@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import type { ComputerRef } from './computer.js';
 import type { RuntimeSessionState } from './runtime.js';
 
 export interface SessionHistoryMessage {
@@ -21,6 +22,8 @@ export interface SessionSummary {
   title: string;
   createdAt: string;
   updatedAt: string;
+  workspaceId?: string;
+  computerRef?: ComputerRef;
 }
 
 interface SessionIndex {
@@ -36,12 +39,31 @@ export interface SessionStore {
   load(id: string): Promise<SessionSnapshot | undefined>;
   save(id: string, snapshot: SessionSnapshot): Promise<void>;
   rename(id: string, title: string): Promise<SessionSummary>;
+  bindComputer(id: string, workspaceId: string, computerRef: ComputerRef): Promise<SessionSummary>;
   remove(id: string): Promise<void>;
   setActive(id: string | undefined): Promise<void>;
 }
 
 function assertSessionId(id: string) {
   if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new Error('Invalid session ID.');
+}
+
+function assertWorkspaceId(id: string) {
+  if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new Error('Invalid workspace ID.');
+}
+
+function validateComputerBinding(workspaceId: unknown, computerRef: unknown): void {
+  if (workspaceId === undefined && computerRef === undefined) return;
+  if (typeof workspaceId !== 'string' || !computerRef || typeof computerRef !== 'object') {
+    throw new Error('Invalid session computer binding.');
+  }
+  assertWorkspaceId(workspaceId);
+  const ref = computerRef as Partial<ComputerRef>;
+  if (typeof ref.backend !== 'string' || !ref.backend || typeof ref.id !== 'string' || !ref.id ||
+      typeof ref.workspaceId !== 'string' || ref.workspaceId !== workspaceId) {
+    throw new Error('Invalid session computer binding.');
+  }
+  assertWorkspaceId(ref.workspaceId);
 }
 
 function normalizeTitle(title: string): string {
@@ -86,6 +108,7 @@ function validateIndex(parsed: unknown): SessionIndex {
       throw new Error('Invalid session index.');
     }
     assertSessionId(value.id);
+    validateComputerBinding(value.workspaceId, value.computerRef);
   }
   if (index.activeSessionId !== undefined) {
     if (typeof index.activeSessionId !== 'string') throw new Error('Invalid session index.');
@@ -183,6 +206,18 @@ export function createFileSessionStore(
       const session = index.sessions.find((item) => item.id === id);
       if (!session) throw new Error(`Unknown session: ${id}`);
       session.title = value;
+      await saveIndex(index);
+      return structuredClone(session);
+    },
+
+    async bindComputer(id, workspaceId, computerRef) {
+      assertSessionId(id);
+      validateComputerBinding(workspaceId, computerRef);
+      const index = await loadIndex();
+      const session = index.sessions.find((item) => item.id === id);
+      if (!session) throw new Error(`Unknown session: ${id}`);
+      session.workspaceId = workspaceId;
+      session.computerRef = structuredClone(computerRef);
       await saveIndex(index);
       return structuredClone(session);
     },

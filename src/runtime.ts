@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { buildContext } from './context.js';
+import type { Computer } from './computer.js';
+import { createComputerTools } from './computer-tools.js';
 import type { AgentEvent, AgentEventHandler } from './events.js';
 import { createFileToolExecutionLedger, createToolExecutionId, ToolExecutionUncertainError, type ToolExecutionLedger, type ToolExecutionRecord } from './execution-ledger.js';
 import { createJevRouter } from './jev.js';
@@ -21,6 +23,7 @@ export interface RuntimeOptions {
   runStore?: RunStore;
   provider?: Provider;
   executionLedger?: ToolExecutionLedger;
+  computer?: Computer;
 }
 
 export interface RunResult {
@@ -53,7 +56,7 @@ export interface AgentRuntime {
 }
 
 export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<AgentRuntime> {
-  const maxSteps = options.maxSteps ?? 8;
+  const maxSteps = options.maxSteps ?? 16;
   const requestToolApproval = options.requestToolApproval;
   const runStore = options.runStore ?? createFileRunStore();
   const provider = options.provider ?? getProvider();
@@ -66,6 +69,7 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
   const subagentRuntime = createSubagentRuntime(provider);
   const toolRegistry = createToolRegistry([
     ...localAgentTools,
+    ...(options.computer ? createComputerTools(options.computer) : []),
     ...adaptToolDefinitions(skills.tools, (toolCall, context) => skills.callTool(toolCall, context.signal), 'sequential'),
     ...adaptToolDefinitions(taskRuntime.tools, (toolCall) => taskRuntime.callTool(toolCall), 'sequential'),
     ...adaptToolDefinitions(subagentRuntime.tools, (toolCall, context) => subagentRuntime.callTool(toolCall, context.signal)),
@@ -142,7 +146,10 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
         signal?.throwIfAborted();
         await emit({ ...base(), type: 'turn_start', step });
 
-        const context = buildContext(memory, messages, taskRuntime.getState(), skills.context());
+        const computerContext = options.computer
+          ? `Current computer: ${options.computer.ref.backend} backend, workspace ${options.computer.ref.workspaceId}. Use the computer_* tools to execute commands and access files in this computer. E2B is a computer backend, not a skill.`
+          : '';
+        const context = buildContext(memory, messages, taskRuntime.getState(), skills.context(), computerContext);
         const routed = await route?.(context, tools, signal);
         if (routed) {
           await emit({ ...base(), type: 'jev_decision', step, decision: { ...routed.decision } });

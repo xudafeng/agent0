@@ -11,6 +11,8 @@ import { jevConfiguration } from '../dist/jev.js';
 import { checkMcpServers, connectMcpServer } from '../dist/mcp.js';
 import { encodeMcpServers, loadMcpServers, mcpConfigKey, validateMcpServers } from '../dist/mcp-config.js';
 import { createFileSessionStore } from '../dist/session-store.js';
+import { createFileWorkspaceStore } from '../dist/workspace.js';
+import { configuredComputerBackend, openSessionComputer } from '../dist/session-computer.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const icon = path.join(root, 'desktop/assets/icon.png');
@@ -25,6 +27,9 @@ let events = [];
 let configPath;
 let savedMemory = '';
 let sessionStore;
+let workspaceStore;
+let computerBackend;
+let computer;
 let sessions = [];
 let activeSessionId;
 let pendingSessionState;
@@ -49,7 +54,26 @@ function state() {
     arguments: pendingApproval.request.toolCall.arguments,
     reason: pendingApproval.request.reason,
   } : null;
-  return { history, events, busy, approval, sessions, activeSessionId, config: configuration(), memory: runtime?.getMemory() || savedMemory, task: runtime?.getTaskState() ?? pendingSessionState?.task ?? null };
+  const activeSession = sessions.find((session) => session.id === activeSessionId);
+  const computerRef = computer?.ref ?? activeSession?.computerRef;
+  return {
+    history,
+    events,
+    busy,
+    approval,
+    sessions,
+    activeSessionId,
+    computer: computerRef ? {
+      configured: true,
+      backend: computerRef.backend,
+      id: computerRef.id,
+      workspaceId: computerRef.workspaceId,
+      connected: Boolean(computer),
+    } : computerBackend ? { configured: true, backend: computerBackend.name, connected: false } : { configured: false },
+    config: configuration(),
+    memory: runtime?.getMemory() || savedMemory,
+    task: runtime?.getTaskState() ?? pendingSessionState?.task ?? null,
+  };
 }
 
 function publish(type, data) {
@@ -89,12 +113,48 @@ function requestToolApproval(request, signal) {
   });
 }
 
+async function releaseComputer(destroy = false) {
+  if (!computer) return;
+  const current = computer;
+  computer = undefined;
+  if (destroy) {
+    await current.destroy();
+    return;
+  }
+  if (current.capabilities.pauseResume) await current.suspend();
+}
+
+async function ensureComputer() {
+  if (!computerBackend || !activeSessionId) return undefined;
+  if (computer) return computer;
+  const active = sessions.find((session) => session.id === activeSessionId);
+  if (!active) throw new Error(`Unknown active session: ${activeSessionId}`);
+  const binding = active.workspaceId && active.computerRef
+    ? { workspaceId: active.workspaceId, computerRef: active.computerRef }
+    : undefined;
+  const opened = await openSessionComputer(computerBackend, workspaceStore, binding);
+  computer = opened.computer;
+  if (opened.created) {
+    await sessionStore.bindComputer(activeSessionId, opened.binding.workspaceId, opened.binding.computerRef);
+    await refreshSessions();
+  }
+  return computer;
+}
+
 async function getRuntime() {
   if (!runtime) {
+    const activeComputer = await ensureComputer();
     runtime = await createAgentRuntime({
-      toolPolicy: (toolCall) => toolCall.name.startsWith('mcp_')
-        ? { action: 'ask', reason: 'MCP tool requires approval before execution.' }
-        : { action: 'allow' },
+      ...(activeComputer ? { computer: activeComputer } : {}),
+      toolPolicy: (toolCall) => {
+        if (toolCall.name.startsWith('mcp_')) {
+          return { action: 'ask', reason: 'MCP tool requires approval before execution.' };
+        }
+        if (toolCall.name === 'computer_exec' || toolCall.name === 'computer_write_file') {
+          return { action: 'ask', reason: 'Computer command or file change requires approval before execution.' };
+        }
+        return { action: 'allow' };
+      },
       requestToolApproval,
     });
     if (pendingSessionState) {
@@ -115,6 +175,7 @@ async function activateSession(id) {
 
   await runtime?.close();
   runtime = undefined;
+  await releaseComputer();
   pendingSessionState = undefined;
   history = snapshot ? structuredClone(snapshot.history) : [];
   pendingSessionState = snapshot ? structuredClone(snapshot.runtime) : undefined;
@@ -214,6 +275,7 @@ handle('session-delete', async (id) => {
   if (deletingActive) {
     await runtime?.close();
     runtime = undefined;
+    await releaseComputer(true);
     pendingSessionState = undefined;
   }
 
@@ -361,6 +423,8 @@ app.whenReady().then(async () => {
     process.env.AGENT0_SKILL_DIRS = '[]';
     process.env.MOONSHOT_API_KEY = '';
     process.env.OPENAI_API_KEY = '';
+    delete process.env.AGENT0_COMPUTER;
+    delete process.env.E2B_API_KEY;
   }
   await mkdir(dataDirectory, { recursive: true });
   process.chdir(dataDirectory);
@@ -368,6 +432,8 @@ app.whenReady().then(async () => {
   dotenv.config({ path: configPath, override: true, quiet: true });
   savedMemory = await loadMemory();
   sessionStore = createFileSessionStore();
+  workspaceStore = createFileWorkspaceStore();
+  computerBackend = configuredComputerBackend(workspaceStore);
   await refreshSessions();
   activeSessionId = await sessionStore.active();
   if (!activeSessionId) {
@@ -419,7 +485,10 @@ app.whenReady().then(async () => {
     if (quitting) return;
     event.preventDefault();
     quitting = true;
-    void Promise.race([runtime?.close(), new Promise((resolve) => setTimeout(resolve, 2000))]).finally(() => app.quit());
+    void Promise.race([
+      Promise.all([runtime?.close(), releaseComputer()]),
+      new Promise((resolve) => setTimeout(resolve, 2000)),
+    ]).finally(() => app.quit());
   });
 
 }).catch((error) => {

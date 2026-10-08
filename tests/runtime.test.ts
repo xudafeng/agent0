@@ -421,3 +421,224 @@ test('failed runs roll back conversation, task, and skill session state', async 
   assert.deepEqual(runtime.getSessionState(), stable);
   assert.deepEqual(runtime.getTaskState(), stable.task);
 });
+
+test('runtime default step budget supports tool-heavy runs beyond eight turns', async (t) => {
+  let calls = 0;
+  const provider: Provider = {
+    async generate(messages) {
+      calls += 1;
+      if (calls <= 9) {
+        return {
+          toolCalls: [{
+            id: `add-${calls}`,
+            name: 'add',
+            arguments: { a: calls, b: 1 },
+          }],
+          id: `response-${calls}`,
+          model: 'fake',
+          usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+        };
+      }
+      assert.ok(messages.some((message) => message.role === 'tool'));
+      return {
+        text: 'done after many tools',
+        id: 'response-final',
+        model: 'fake',
+        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      };
+    },
+  };
+
+  const runtime = await createAgentRuntime({
+    provider,
+    runStore: {
+      async save() {},
+      async load() { return undefined; },
+    },
+    executionLedger: {
+      async load() { return undefined; },
+      async save() {},
+    },
+    skillDirectories: [],
+  });
+  t.after(() => runtime.close());
+
+  const result = await runtime.run('use several tools');
+  assert.equal(result.text, 'done after many tools');
+  assert.equal(result.steps, 10);
+  assert.equal(calls, 10);
+});
+
+test('runtime still enforces an explicit max step budget', async (t) => {
+  let calls = 0;
+  const provider: Provider = {
+    async generate() {
+      calls += 1;
+      return {
+        toolCalls: [{
+          id: `add-${calls}`,
+          name: 'add',
+          arguments: { a: 1, b: 1 },
+        }],
+        id: `response-${calls}`,
+        model: 'fake',
+        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      };
+    },
+  };
+
+  const runtime = await createAgentRuntime({
+    provider,
+    maxSteps: 3,
+    runStore: {
+      async save() {},
+      async load() { return undefined; },
+    },
+    executionLedger: {
+      async load() { return undefined; },
+      async save() {},
+    },
+    skillDirectories: [],
+  });
+  t.after(() => runtime.close());
+
+  await assert.rejects(runtime.run('loop forever'), /Agent run exceeded max steps: 3/);
+  assert.equal(calls, 3);
+});
+
+test('runtime executes injected computer tools and feeds results back to the model', async (t) => {
+  const computerCalls: unknown[] = [];
+  const computer: import('../src/computer.js').Computer = {
+    ref: { backend: 'fake', id: 'computer-1', workspaceId: 'workspace-1' },
+    capabilities: {
+      persistentFilesystem: true,
+      persistentMemory: false,
+      pauseResume: false,
+      snapshot: false,
+      fork: false,
+      desktop: false,
+    },
+    async exec(input) {
+      computerCalls.push(input);
+      return { exitCode: 0, stdout: '/workspace\n', stderr: '' };
+    },
+    async readTextFile() { return ''; },
+    async writeTextFile() {},
+    async suspend() {},
+    async resume() {},
+    async snapshot() { throw new Error('unsupported'); },
+    async destroy() {},
+  };
+
+  let calls = 0;
+  const provider: Provider = {
+    async generate(messages, tools) {
+      calls += 1;
+      assert.ok(tools.some((tool) => tool.name === 'computer_exec'));
+      if (calls === 1) {
+        return {
+          toolCalls: [{
+            id: 'computer-1',
+            name: 'computer_exec',
+            arguments: { command: 'pwd' },
+          }],
+          id: 'response-1',
+          model: 'fake',
+          usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+        };
+      }
+      assert.ok(messages.some((message) =>
+        message.role === 'tool' &&
+        message.toolCallId === 'computer-1' &&
+        message.content.includes('/workspace'),
+      ));
+      return {
+        text: 'computer worked',
+        id: 'response-2',
+        model: 'fake',
+        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      };
+    },
+  };
+
+  const runtime = await createAgentRuntime({
+    provider,
+    computer,
+    runStore: {
+      async save() {},
+      async load() { return undefined; },
+    },
+    executionLedger: {
+      async load() { return undefined; },
+      async save() {},
+    },
+    skillDirectories: [],
+  });
+  t.after(() => runtime.close());
+
+  const result = await runtime.run('show the current directory');
+  assert.equal(result.text, 'computer worked');
+  assert.equal(result.steps, 2);
+  assert.deepEqual(computerCalls, [{ command: 'pwd' }]);
+});
+
+test('runtime tells the model that E2B is the active computer backend', async (t) => {
+  const computer: import('../src/computer.js').Computer = {
+    ref: { backend: 'e2b', id: 'sandbox-1', workspaceId: 'workspace-1' },
+    capabilities: {
+      persistentFilesystem: true,
+      persistentMemory: true,
+      pauseResume: true,
+      snapshot: false,
+      fork: false,
+      desktop: false,
+    },
+    async exec() { return { exitCode: 0, stdout: '', stderr: '' }; },
+    async readTextFile() { return ''; },
+    async writeTextFile() {},
+    async suspend() {},
+    async resume() {},
+    async snapshot() { throw new Error('unsupported'); },
+    async destroy() {},
+  };
+
+  let seenMessages: Message[] = [];
+  let seenTools: import('../src/tools.js').ToolDefinition[] = [];
+  const provider: Provider = {
+    async generate(messages, tools = []) {
+      seenMessages = structuredClone(messages);
+      seenTools = structuredClone(tools);
+      return {
+        text: 'ready',
+        id: 'response-1',
+        model: 'fake',
+        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      };
+    },
+  };
+
+  const runtime = await createAgentRuntime({
+    provider,
+    computer,
+    runStore: {
+      async save() {},
+      async load() { return undefined; },
+    },
+    executionLedger: {
+      async load() { return undefined; },
+      async save() {},
+    },
+    skillDirectories: [],
+  });
+  t.after(() => runtime.close());
+
+  await runtime.run('run ls in E2B');
+  const system = seenMessages.find((message) => message.role === 'system');
+  assert.ok(system && 'content' in system);
+  assert.ok(system.content.includes('Current computer: e2b backend'));
+  assert.ok(system.content.includes('E2B is a computer backend, not a skill.'));
+  assert.ok(
+    seenTools.find((tool) => tool.name === 'computer_exec')?.description.includes('E2B sandbox'),
+  );
+});
+
