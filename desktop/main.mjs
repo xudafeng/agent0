@@ -416,6 +416,8 @@ app.whenReady().then(async () => {
     process.env.AGENT0_SKILL_DIRS = '[]';
     process.env.MOONSHOT_API_KEY = '';
     process.env.OPENAI_API_KEY = '';
+    delete process.env.AGENT0_COMPUTER;
+    delete process.env.E2B_API_KEY;
   }
   await mkdir(dataDirectory, { recursive: true });
   process.chdir(dataDirectory);
