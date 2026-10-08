@@ -1,50 +1,23 @@
+import { z } from 'zod';
 import type { Computer } from './computer.js';
-import type { AgentTool, ToolCall } from './tools.js';
+import type { AgentTool } from './tools.js';
 
-function stringArg(toolCall: ToolCall, name: string): string {
-  const value = toolCall.arguments[name];
-  if (typeof value !== 'string' || !value.trim()) {
-    throw new Error(`Computer tool requires non-empty string argument: ${name}`);
-  }
-  return value;
-}
+const computerExecSchema = z.object({
+  command: z.string().trim().min(1),
+  args: z.array(z.string()).optional(),
+  cwd: z.string().trim().min(1).optional(),
+  env: z.record(z.string(), z.string()).optional(),
+  timeoutMs: z.number().finite().positive().optional(),
+}).strict();
 
-function optionalStringArg(toolCall: ToolCall, name: string): string | undefined {
-  const value = toolCall.arguments[name];
-  if (value === undefined) return undefined;
-  if (typeof value !== 'string' || !value.trim()) {
-    throw new Error(`Computer tool argument must be a non-empty string: ${name}`);
-  }
-  return value;
-}
+const computerReadFileSchema = z.object({
+  path: z.string().trim().min(1),
+}).strict();
 
-function stringArrayArg(toolCall: ToolCall, name: string): string[] | undefined {
-  const value = toolCall.arguments[name];
-  if (value === undefined) return undefined;
-  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
-    throw new Error(`Computer tool argument must be an array of strings: ${name}`);
-  }
-  return value;
-}
-
-function stringRecordArg(toolCall: ToolCall, name: string): Record<string, string> | undefined {
-  const value = toolCall.arguments[name];
-  if (value === undefined) return undefined;
-  if (!value || typeof value !== 'object' || Array.isArray(value) ||
-      Object.values(value).some((item) => typeof item !== 'string')) {
-    throw new Error(`Computer tool argument must be an object of string values: ${name}`);
-  }
-  return value as Record<string, string>;
-}
-
-function positiveNumberArg(toolCall: ToolCall, name: string): number | undefined {
-  const value = toolCall.arguments[name];
-  if (value === undefined) return undefined;
-  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
-    throw new Error(`Computer tool argument must be a positive number: ${name}`);
-  }
-  return value;
-}
+const computerWriteFileSchema = z.object({
+  path: z.string().trim().min(1),
+  content: z.string(),
+}).strict();
 
 export function createComputerTools(computer: Computer): AgentTool[] {
   const backend = computer.ref.backend;
@@ -72,19 +45,9 @@ export function createComputerTools(computer: Computer): AgentTool[] {
       },
       executionMode: 'sequential',
       idempotency: 'non-idempotent',
-      async execute(toolCall, context) {
-        const command = stringArg(toolCall, 'command');
-        const args = stringArrayArg(toolCall, 'args');
-        const cwd = optionalStringArg(toolCall, 'cwd');
-        const env = stringRecordArg(toolCall, 'env');
-        const timeoutMs = positiveNumberArg(toolCall, 'timeoutMs');
-        return computer.exec({
-          command,
-          ...(args === undefined ? {} : { args }),
-          ...(cwd === undefined ? {} : { cwd }),
-          ...(env === undefined ? {} : { env }),
-          ...(timeoutMs === undefined ? {} : { timeoutMs }),
-        }, context.signal);
+      execute(toolCall, context) {
+        const input = computerExecSchema.parse(toolCall.arguments);
+        return computer.exec(input, context.signal);
       },
     },
     {
@@ -103,7 +66,8 @@ export function createComputerTools(computer: Computer): AgentTool[] {
       executionMode: 'sequential',
       idempotency: 'idempotent',
       execute(toolCall, context) {
-        return computer.readTextFile(stringArg(toolCall, 'path'), context.signal);
+        const { path } = computerReadFileSchema.parse(toolCall.arguments);
+        return computer.readTextFile(path, context.signal);
       },
     },
     {
@@ -123,9 +87,7 @@ export function createComputerTools(computer: Computer): AgentTool[] {
       executionMode: 'sequential',
       idempotency: 'non-idempotent',
       async execute(toolCall, context) {
-        const path = stringArg(toolCall, 'path');
-        const content = toolCall.arguments.content;
-        if (typeof content !== 'string') throw new Error('Computer tool requires string argument: content');
+        const { path, content } = computerWriteFileSchema.parse(toolCall.arguments);
         await computer.writeTextFile(path, content, context.signal);
         return { path, bytes: Buffer.byteLength(content, 'utf8') };
       },
