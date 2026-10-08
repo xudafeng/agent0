@@ -141,6 +141,22 @@ test('E2BComputer reconnects by stable sandbox ID and preserves workspace identi
   assert.equal(computer.ref.id, 'sandbox-existing');
 });
 
+test('E2BComputer rejects invalid workspace identity during reconnect', async () => {
+  const fake = fakeSandbox('sandbox-existing');
+  const backend = createE2BComputerBackend({
+    connectSandbox: async () => fake.sandbox,
+  });
+
+  await assert.rejects(
+    backend.reconnect({
+      backend: 'e2b',
+      id: 'sandbox-existing',
+      workspaceId: '../escape',
+    }),
+    /Invalid workspace ID/,
+  );
+});
+
 test('E2BComputer rejects workspace path escapes and safely quotes arguments', async () => {
   const fake = fakeSandbox();
   const computer = await createE2BComputerBackend({
