@@ -506,3 +506,79 @@ test('runtime still enforces an explicit max step budget', async (t) => {
   assert.equal(calls, 3);
 });
 
+test('runtime executes injected computer tools and feeds results back to the model', async (t) => {
+  const computerCalls: unknown[] = [];
+  const computer: import('../src/computer.js').Computer = {
+    ref: { backend: 'fake', id: 'computer-1', workspaceId: 'workspace-1' },
+    capabilities: {
+      persistentFilesystem: true,
+      persistentMemory: false,
+      pauseResume: false,
+      snapshot: false,
+      fork: false,
+      desktop: false,
+    },
+    async exec(input) {
+      computerCalls.push(input);
+      return { exitCode: 0, stdout: '/workspace\n', stderr: '' };
+    },
+    async readTextFile() { return ''; },
+    async writeTextFile() {},
+    async suspend() {},
+    async resume() {},
+    async snapshot() { throw new Error('unsupported'); },
+    async destroy() {},
+  };
+
+  let calls = 0;
+  const provider: Provider = {
+    async generate(messages, tools) {
+      calls += 1;
+      assert.ok(tools.some((tool) => tool.name === 'computer_exec'));
+      if (calls === 1) {
+        return {
+          toolCalls: [{
+            id: 'computer-1',
+            name: 'computer_exec',
+            arguments: { command: 'pwd' },
+          }],
+          id: 'response-1',
+          model: 'fake',
+          usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+        };
+      }
+      assert.ok(messages.some((message) =>
+        message.role === 'tool' &&
+        message.toolCallId === 'computer-1' &&
+        message.content.includes('/workspace'),
+      ));
+      return {
+        text: 'computer worked',
+        id: 'response-2',
+        model: 'fake',
+        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      };
+    },
+  };
+
+  const runtime = await createAgentRuntime({
+    provider,
+    computer,
+    runStore: {
+      async save() {},
+      async load() { return undefined; },
+    },
+    executionLedger: {
+      async load() { return undefined; },
+      async save() {},
+    },
+    skillDirectories: [],
+  });
+  t.after(() => runtime.close());
+
+  const result = await runtime.run('show the current directory');
+  assert.equal(result.text, 'computer worked');
+  assert.equal(result.steps, 2);
+  assert.deepEqual(computerCalls, [{ command: 'pwd' }]);
+});
+
