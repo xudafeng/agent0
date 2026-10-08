@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { buildContext } from './context.js';
+import type { Computer } from './computer.js';
+import { createComputerTools } from './computer-tools.js';
 import type { AgentEvent, AgentEventHandler } from './events.js';
 import { createFileToolExecutionLedger, createToolExecutionId, ToolExecutionUncertainError, type ToolExecutionLedger, type ToolExecutionRecord } from './execution-ledger.js';
 import { createJevRouter } from './jev.js';
@@ -21,6 +23,7 @@ export interface RuntimeOptions {
   runStore?: RunStore;
   provider?: Provider;
   executionLedger?: ToolExecutionLedger;
+  computer?: Computer;
 }
 
 export interface RunResult {
@@ -66,6 +69,7 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
   const subagentRuntime = createSubagentRuntime(provider);
   const toolRegistry = createToolRegistry([
     ...localAgentTools,
+    ...(options.computer ? createComputerTools(options.computer) : []),
     ...adaptToolDefinitions(skills.tools, (toolCall, context) => skills.callTool(toolCall, context.signal), 'sequential'),
     ...adaptToolDefinitions(taskRuntime.tools, (toolCall) => taskRuntime.callTool(toolCall), 'sequential'),
     ...adaptToolDefinitions(subagentRuntime.tools, (toolCall, context) => subagentRuntime.callTool(toolCall, context.signal)),
