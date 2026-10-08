@@ -421,3 +421,88 @@ test('failed runs roll back conversation, task, and skill session state', async 
   assert.deepEqual(runtime.getSessionState(), stable);
   assert.deepEqual(runtime.getTaskState(), stable.task);
 });
+
+test('runtime default step budget supports tool-heavy runs beyond eight turns', async (t) => {
+  let calls = 0;
+  const provider: Provider = {
+    async generate(messages) {
+      calls += 1;
+      if (calls <= 9) {
+        return {
+          toolCalls: [{
+            id: `add-${calls}`,
+            name: 'add',
+            arguments: { a: calls, b: 1 },
+          }],
+          id: `response-${calls}`,
+          model: 'fake',
+          usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+        };
+      }
+      assert.ok(messages.some((message) => message.role === 'tool'));
+      return {
+        text: 'done after many tools',
+        id: 'response-final',
+        model: 'fake',
+        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      };
+    },
+  };
+
+  const runtime = await createAgentRuntime({
+    provider,
+    runStore: {
+      async save() {},
+      async load() { return undefined; },
+    },
+    executionLedger: {
+      async load() { return undefined; },
+      async save() {},
+    },
+    skillDirectories: [],
+  });
+  t.after(() => runtime.close());
+
+  const result = await runtime.run('use several tools');
+  assert.equal(result.text, 'done after many tools');
+  assert.equal(result.steps, 10);
+  assert.equal(calls, 10);
+});
+
+test('runtime still enforces an explicit max step budget', async (t) => {
+  let calls = 0;
+  const provider: Provider = {
+    async generate() {
+      calls += 1;
+      return {
+        toolCalls: [{
+          id: `add-${calls}`,
+          name: 'add',
+          arguments: { a: 1, b: 1 },
+        }],
+        id: `response-${calls}`,
+        model: 'fake',
+        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      };
+    },
+  };
+
+  const runtime = await createAgentRuntime({
+    provider,
+    maxSteps: 3,
+    runStore: {
+      async save() {},
+      async load() { return undefined; },
+    },
+    executionLedger: {
+      async load() { return undefined; },
+      async save() {},
+    },
+    skillDirectories: [],
+  });
+  t.after(() => runtime.close());
+
+  await assert.rejects(runtime.run('loop forever'), /Agent run exceeded max steps: 3/);
+  assert.equal(calls, 3);
+});
+
