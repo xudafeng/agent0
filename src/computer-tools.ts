@@ -72,12 +72,16 @@ export function createComputerTools(computer: Computer): AgentTool[] {
       executionMode: 'sequential',
       idempotency: 'non-idempotent',
       async execute(toolCall, context) {
+        const args = stringArrayArg(toolCall, 'args');
+        const cwd = optionalStringArg(toolCall, 'cwd');
+        const env = stringRecordArg(toolCall, 'env');
+        const timeoutMs = positiveNumberArg(toolCall, 'timeoutMs');
         return computer.exec({
           command: stringArg(toolCall, 'command'),
-          ...(stringArrayArg(toolCall, 'args') ? { args: stringArrayArg(toolCall, 'args') } : {}),
-          ...(optionalStringArg(toolCall, 'cwd') ? { cwd: optionalStringArg(toolCall, 'cwd') } : {}),
-          ...(stringRecordArg(toolCall, 'env') ? { env: stringRecordArg(toolCall, 'env') } : {}),
-          ...(positiveNumberArg(toolCall, 'timeoutMs') ? { timeoutMs: positiveNumberArg(toolCall, 'timeoutMs') } : {}),
+          ...(args === undefined ? {} : { args }),
+          ...(cwd === undefined ? {} : { cwd }),
+          ...(env === undefined ? {} : { env }),
+          ...(timeoutMs === undefined ? {} : { timeoutMs }),
         }, context.signal);
       },
     },
