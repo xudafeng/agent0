@@ -64,6 +64,10 @@ function quote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
+function assertWorkspaceId(id: string): void {
+  if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new Error('Invalid workspace ID.');
+}
+
 function commandLine(input: ComputerExecInput): string {
   if (!input.command.trim()) throw new Error('Computer command cannot be empty.');
   if (input.args?.some((arg) => typeof arg !== 'string')) throw new Error('Computer command arguments must be strings.');
@@ -95,6 +99,7 @@ function createE2BComputer(
     id: sandbox.sandboxId,
     workspaceId,
   };
+  assertWorkspaceId(workspaceId);
   const workspaceRoot = posix.join(root, workspaceId);
 
   const assertActive = () => {
@@ -169,7 +174,7 @@ export function createE2BComputerBackend(options: E2BComputerBackendOptions = {}
       ...(options.apiKey ? { apiKey: options.apiKey } : {}),
       ...(options.sandboxTimeoutMs === undefined ? {} : { timeoutMs: options.sandboxTimeoutMs }),
       metadata: { agent0WorkspaceId: workspace.id },
-      lifecycle: { onTimeout: 'pause' as const },
+      lifecycle: { onTimeout: { action: 'pause' as const, keepMemory: true } },
     };
     return options.template
       ? Sandbox.create(options.template, createOptions)
