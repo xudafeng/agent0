@@ -150,7 +150,7 @@ async function getRuntime() {
         if (toolCall.name.startsWith('mcp_')) {
           return { action: 'ask', reason: 'MCP tool requires approval before execution.' };
         }
-        if (toolCall.name === 'computer_exec' || toolCall.name === 'computer_write_file') {
+        if (toolCall.name === 'computer_exec' || toolCall.name === 'computer_write_file' || toolCall.name === 'computer_start_process') {
           return { action: 'ask', reason: 'Computer command or file change requires approval before execution.' };
         }
         return { action: 'allow' };
