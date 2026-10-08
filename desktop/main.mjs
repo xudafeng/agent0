@@ -143,11 +143,18 @@ async function ensureComputer() {
 
 async function getRuntime() {
   if (!runtime) {
-    await ensureComputer();
+    const activeComputer = await ensureComputer();
     runtime = await createAgentRuntime({
-      toolPolicy: (toolCall) => toolCall.name.startsWith('mcp_')
-        ? { action: 'ask', reason: 'MCP tool requires approval before execution.' }
-        : { action: 'allow' },
+      ...(activeComputer ? { computer: activeComputer } : {}),
+      toolPolicy: (toolCall) => {
+        if (toolCall.name.startsWith('mcp_')) {
+          return { action: 'ask', reason: 'MCP tool requires approval before execution.' };
+        }
+        if (toolCall.name === 'computer_exec' || toolCall.name === 'computer_write_file') {
+          return { action: 'ask', reason: 'Computer command or file change requires approval before execution.' };
+        }
+        return { action: 'allow' };
+      },
       requestToolApproval,
     });
     if (pendingSessionState) {
