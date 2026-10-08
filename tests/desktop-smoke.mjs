@@ -332,7 +332,7 @@ try {
   assert.equal(await evaluate('document.getElementById(\'prompt\').value'), 'Keep this draft');
   assert.deepEqual((await evaluate('window.agent0.state()')).history, before.history);
   await switchLanguage('zh');
-  assert.ok(await evaluate('document.getElementById(\'activity\').textContent.includes(\'工具调用和进度\')'));
+  assert.ok(await evaluate('document.getElementById(\'activity\').textContent.includes(\'实时展示工具调用与进度。\')'));
   window.reload();
   await new Promise((resolve) => window.webContents.once('did-finish-load', resolve));
   await waitFor('document.getElementById(\'conversation\').textContent.includes(\'Desktop integration works\')');
