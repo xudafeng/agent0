@@ -157,7 +157,7 @@ async function getRuntime() {
         if (toolCall.name.startsWith('mcp_')) {
           return { action: 'ask', reason: 'MCP tool requires approval before execution.' };
         }
-        if (toolCall.name === 'computer_exec' || toolCall.name === 'computer_write_file' || toolCall.name === 'computer_start_process' || toolCall.name === 'job_start' || toolCall.name === 'schedule_create' || toolCall.name === 'schedule_create_cron' || toolCall.name === 'schedule_cancel' || toolCall.name === 'memory_remember' || toolCall.name === 'memory_update' || toolCall.name === 'memory_forget' || toolCall.name.startsWith('personal_')) {
+        if (toolCall.name === 'computer_exec' || toolCall.name === 'computer_write_file' || toolCall.name === 'computer_start_process' || toolCall.name === 'job_start' || toolCall.name === 'schedule_create' || toolCall.name === 'schedule_create_cron' || toolCall.name === 'schedule_cancel' || toolCall.name === 'memory_remember' || toolCall.name === 'memory_update' || toolCall.name === 'memory_forget' || (toolCall.name.startsWith('personal_') && toolCall.name !== 'personal_state')) {
           return { action: 'ask', reason: toolCall.name.startsWith('memory_') ? 'Persistent memory changes require approval before execution.' : toolCall.name.startsWith('personal_') ? 'Personal agent state changes require approval before execution.' : 'Computer command, file change, background job, or schedule change requires approval before execution.' };
         }
         return { action: 'allow' };
