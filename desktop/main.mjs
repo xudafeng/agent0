@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import dotenv from 'dotenv';
 import { createAgentRuntime } from '../dist/runtime.js';
-import { loadMemory } from '../dist/memory.js';
+import { createFileMemoryStore } from '../dist/memory.js';
 import { createSkillRuntime, skillDirectories } from '../dist/skills.js';
 import { jevConfiguration } from '../dist/jev.js';
 import { checkMcpServers, connectMcpServer } from '../dist/mcp.js';
@@ -28,6 +28,7 @@ let history = [];
 let events = [];
 let configPath;
 let savedMemory = '';
+let memoryStore;
 let sessionStore;
 let workspaceStore;
 let computerBackend;
@@ -148,12 +149,13 @@ async function getRuntime() {
     const activeComputer = await ensureComputer();
     runtime = await createAgentRuntime({
       ...(activeComputer ? { computer: activeComputer } : {}),
+      memoryStore,
       toolPolicy: (toolCall) => {
         if (toolCall.name.startsWith('mcp_')) {
           return { action: 'ask', reason: 'MCP tool requires approval before execution.' };
         }
-        if (toolCall.name === 'computer_exec' || toolCall.name === 'computer_write_file' || toolCall.name === 'computer_start_process' || toolCall.name === 'job_start' || toolCall.name === 'schedule_create' || toolCall.name === 'schedule_create_cron' || toolCall.name === 'schedule_cancel') {
-          return { action: 'ask', reason: 'Computer command, file change, background job, or schedule change requires approval before execution.' };
+        if (toolCall.name === 'computer_exec' || toolCall.name === 'computer_write_file' || toolCall.name === 'computer_start_process' || toolCall.name === 'job_start' || toolCall.name === 'schedule_create' || toolCall.name === 'schedule_create_cron' || toolCall.name === 'schedule_cancel' || toolCall.name === 'memory_remember' || toolCall.name === 'memory_update' || toolCall.name === 'memory_forget') {
+          return { action: 'ask', reason: toolCall.name.startsWith('memory_') ? 'Persistent memory changes require approval before execution.' : 'Computer command, file change, background job, or schedule change requires approval before execution.' };
         }
         return { action: 'allow' };
       },
@@ -229,7 +231,7 @@ function text(value, name, limit = 32000) {
 function handle(name, action) {
   ipcMain.handle(`agent:${name}`, async (event, payload) => {
     if (event.sender !== window?.webContents || event.senderFrame !== window.webContents.mainFrame) throw new Error('Unknown sender.');
-    if (name === 'state' || name === 'mcp-list' || name === 'background-state' || name === 'background-job-output') return action(payload);
+    if (name === 'state' || name === 'mcp-list' || name === 'background-state' || name === 'background-job-output' || name === 'memory-list' || name === 'memory-search') return action(payload);
     if (busy) throw new Error('Wait for the current operation to finish.');
     busy = true;
     publish('state', state());
@@ -363,6 +365,39 @@ handle('session-delete', async (id) => {
   pendingSessionState = snapshot ? structuredClone(snapshot.runtime) : undefined;
   events = [];
 });
+handle('memory-list', async (scope) => {
+  if (scope !== undefined && typeof scope !== 'string') throw new Error('Invalid memory scope.');
+  return memoryStore.list(scope);
+});
+handle('memory-search', async (input) => {
+  if (!input || typeof input.query !== 'string') throw new Error('Invalid memory search.');
+  const scopes = input.scope ? [input.scope] : undefined;
+  return memoryStore.search(input.query, scopes ? { scopes } : undefined);
+});
+handle('memory-add', async (input) => {
+  if (!input || typeof input.content !== 'string' || (input.scope !== undefined && typeof input.scope !== 'string')) {
+    throw new Error('Invalid memory.');
+  }
+  if (runtime) await runtime.remember(input.content, input.scope);
+  else await memoryStore.remember(input.content, input.scope);
+  savedMemory = runtime?.getMemory() ?? await memoryStore.render();
+});
+handle('memory-update', async (input) => {
+  if (!input || typeof input.id !== 'string' || typeof input.content !== 'string' ||
+      (input.scope !== undefined && typeof input.scope !== 'string')) {
+    throw new Error('Invalid memory update.');
+  }
+  if (runtime) await runtime.updateMemory(input.id, input.content, input.scope);
+  else await memoryStore.update(input.id, input.content, input.scope);
+  savedMemory = runtime?.getMemory() ?? await memoryStore.render();
+});
+handle('memory-forget', async (id) => {
+  if (typeof id !== 'string') throw new Error('Invalid memory ID.');
+  if (runtime) await runtime.forgetMemory(id);
+  else await memoryStore.forget(id);
+  savedMemory = runtime?.getMemory() ?? await memoryStore.render();
+});
+
 handle('skills-list', async () => {
   const directories = skillDirectories();
   if (runtime) return { ...runtime.getSkills(), directories };
@@ -498,7 +533,8 @@ app.whenReady().then(async () => {
   process.chdir(dataDirectory);
   configPath = path.join(dataDirectory, '.env');
   dotenv.config({ path: configPath, override: true, quiet: true });
-  savedMemory = await loadMemory();
+  memoryStore = createFileMemoryStore();
+  savedMemory = await memoryStore.render();
   sessionStore = createFileSessionStore();
   workspaceStore = createFileWorkspaceStore();
   computerBackend = configuredComputerBackend(workspaceStore);
