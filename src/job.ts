@@ -105,10 +105,12 @@ export async function getDurableJobStatus(
   }
 
   if (process.state === 'completed') {
+    const exitCode = process.exitCode;
+    if (exitCode === undefined) throw new Error('Completed process is missing an exit code.');
     const completed: DurableJob = {
       ...job,
-      state: process.exitCode === 0 ? 'succeeded' : 'failed',
-      exitCode: process.exitCode,
+      state: exitCode === 0 ? 'succeeded' : 'failed',
+      exitCode,
       completedAt: job.completedAt ?? new Date().toISOString(),
     };
     await saveJob(computer, completed, signal);
