@@ -35,18 +35,29 @@ function messageCost(message: Message): number {
 }
 
 function selectRecentConversation(messages: Message[], maxChars: number): Message[] {
-  const selected: Message[] = [];
-  let used = 0;
+  const segments: Message[][] = [];
+  let current: Message[] = [];
 
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index]!;
-    const cost = messageCost(message);
+  for (const message of messages) {
+    if (message.role === 'user' && current.length) {
+      segments.push(current);
+      current = [];
+    }
+    current.push(message);
+  }
+  if (current.length) segments.push(current);
+
+  const selected: Message[][] = [];
+  let used = 0;
+  for (let index = segments.length - 1; index >= 0; index -= 1) {
+    const segment = segments[index]!;
+    const cost = segment.reduce((sum, message) => sum + messageCost(message), 0);
     if (selected.length > 0 && used + cost > maxChars) break;
-    selected.push(message);
+    selected.push(segment);
     used += cost;
   }
 
-  return selected.reverse();
+  return selected.reverse().flat();
 }
 
 export function buildContext(
