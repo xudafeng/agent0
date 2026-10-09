@@ -13,6 +13,8 @@ import { encodeMcpServers, loadMcpServers, mcpConfigKey, validateMcpServers } fr
 import { createFileSessionStore } from '../dist/session-store.js';
 import { createFileWorkspaceStore } from '../dist/workspace.js';
 import { configuredComputerBackend, openSessionComputer } from '../dist/session-computer.js';
+import { createDurableScheduler } from '../dist/scheduler.js';
+import { listDurableJobs, readDurableJobOutput } from '../dist/job.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const icon = path.join(root, 'desktop/assets/icon.png');
@@ -255,7 +257,73 @@ ipcMain.handle('agent:approval-resolve', (event, input) => {
   return true;
 });
 
+async function withBackgroundComputer(action) {
+  if (!computerBackend || !activeSessionId) return undefined;
+  const active = sessions.find((session) => session.id === activeSessionId);
+  if (!active?.workspaceId || !active.computerRef) return undefined;
+
+  const current = computer;
+  const openedHere = !current;
+  const activeComputer = current ?? (await openSessionComputer(computerBackend, workspaceStore, {
+    workspaceId: active.workspaceId,
+    computerRef: active.computerRef,
+  })).computer;
+
+  try {
+    return await action(activeComputer);
+  } finally {
+    if (openedHere && activeComputer.capabilities.pauseResume) {
+      await activeComputer.suspend();
+    }
+  }
+}
+
+async function backgroundState() {
+  const result = await withBackgroundComputer(async (activeComputer) => {
+    const scheduler = await createDurableScheduler(activeComputer, { armTimers: false });
+    try {
+      const schedules = await scheduler.list();
+      const jobs = await listDurableJobs(activeComputer);
+      return {
+        configured: true,
+        nextWakeAt: scheduler.nextWakeAt(),
+        schedules,
+        jobs,
+      };
+    } finally {
+      await scheduler.close();
+    }
+  });
+
+  return result ?? {
+    configured: Boolean(computerBackend),
+    nextWakeAt: undefined,
+    schedules: [],
+    jobs: [],
+  };
+}
+
 handle('state', state);
+handle('background-state', backgroundState);
+handle('background-cancel-schedule', async (scheduleId) => {
+  if (typeof scheduleId !== 'string') throw new Error('Invalid schedule ID.');
+  const cancelled = await withBackgroundComputer(async (activeComputer) => {
+    const scheduler = await createDurableScheduler(activeComputer, { armTimers: false });
+    try {
+      return scheduler.cancel(scheduleId);
+    } finally {
+      await scheduler.close();
+    }
+  });
+  if (!cancelled) throw new Error('No computer is bound to this conversation.');
+  return cancelled;
+});
+handle('background-job-output', async (jobId) => {
+  if (typeof jobId !== 'string') throw new Error('Invalid job ID.');
+  const output = await withBackgroundComputer((activeComputer) => readDurableJobOutput(activeComputer, jobId));
+  if (!output) throw new Error('No computer is bound to this conversation.');
+  return output;
+});
 handle('session-create', async (title) => {
   if (title !== undefined && typeof title !== 'string') throw new Error('Invalid session title.');
   return createSession(title?.trim() || 'New conversation');
