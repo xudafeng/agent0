@@ -4,6 +4,7 @@ import type { AgentTool } from './tools.js';
 
 const scheduleCreateSchema = z.object({
   runAt: z.string().trim().min(1),
+  repeatEveryMs: z.number().finite().positive().optional(),
   command: z.string().trim().min(1),
   args: z.array(z.string()).optional(),
   cwd: z.string().trim().min(1).optional(),
@@ -19,11 +20,12 @@ export function createSchedulerTools(scheduler: DurableScheduler): AgentTool[] {
     {
       definition: {
         name: 'schedule_create',
-        description: 'Schedule a durable background job to start once at a future ISO date-time.',
+        description: 'Schedule a durable background job at a future ISO date-time, optionally repeating at a fixed interval.',
         parameters: {
           type: 'object',
           properties: {
             runAt: { type: 'string', description: 'Future ISO date-time when the job should start.' },
+            repeatEveryMs: { type: 'number', description: 'Optional positive interval in milliseconds for recurring schedules.' },
             command: { type: 'string', description: 'Executable to start.' },
             args: { type: 'array', items: { type: 'string' }, description: 'Command arguments.' },
             cwd: { type: 'string', description: 'Optional workspace-relative working directory.' },
@@ -46,7 +48,7 @@ export function createSchedulerTools(scheduler: DurableScheduler): AgentTool[] {
           ...(parsed.args === undefined ? {} : { args: parsed.args }),
           ...(parsed.cwd === undefined ? {} : { cwd: parsed.cwd }),
           ...(parsed.env === undefined ? {} : { env: parsed.env }),
-        }, parsed.runAt);
+        }, parsed.runAt, parsed.repeatEveryMs);
       },
     },
     {
