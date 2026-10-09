@@ -75,9 +75,10 @@ function score(entry: MemoryEntry, query: string): number {
   if (!normalizedQuery) return 0;
   const content = entry.content.toLocaleLowerCase();
   let value = content.includes(normalizedQuery) ? 100 : 0;
-  const terms = [...new Set(tokenize(normalizedQuery))];
-  for (const term of terms) {
-    if (content.includes(term)) value += Math.max(1, Math.min(20, term.length));
+  const queryTerms = [...new Set(tokenize(normalizedQuery))];
+  const contentTerms = new Set(tokenize(content));
+  for (const term of queryTerms) {
+    if (contentTerms.has(term)) value += Math.max(1, Math.min(20, term.length));
   }
   if (entry.scope === 'working') value += 2;
   return value;
