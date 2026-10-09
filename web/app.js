@@ -11,6 +11,8 @@ let renderedHistory = '';
 let renderedSessions = '';
 let progressEvent;
 let keepSavedKey = false;
+let backgroundSessionId = '';
+let backgroundLoading = false;
 
 applyLanguage();
 const mcpSettings = setupMcpSettings();
@@ -112,6 +114,100 @@ function renderSessions(state, locked) {
   $('active-session-title').textContent = active?.title || t('Conversation');
 }
 
+
+function formatBackgroundTime(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toLocaleString() : value;
+}
+
+function backgroundStateBadge(state) {
+  return state === 'succeeded' ? '✓' : state === 'failed' ? '!' : state === 'running' || state === 'starting' ? '●' : state === 'cancelled' ? '⊘' : '○';
+}
+
+async function openJobOutput(job) {
+  try {
+    const output = await api.jobOutput(job.jobId);
+    $('background-job-title').textContent = `Job ${job.jobId.slice(0, 8)}`;
+    $('background-job-meta').textContent = [job.state, job.exitCode === undefined ? '' : `exit ${job.exitCode}`].filter(Boolean).join(' · ');
+    $('background-job-stdout').textContent = output.stdout || '(empty)';
+    $('background-job-stderr').textContent = output.stderr || '(empty)';
+    $('background-job-dialog').showModal();
+  } catch (error) {
+    showError(error);
+  }
+}
+
+function renderBackground(data) {
+  const schedules = data?.schedules ?? [];
+  const jobs = data?.jobs ?? [];
+  $('background-next').textContent = data?.nextWakeAt
+    ? `Next wake · ${formatBackgroundTime(data.nextWakeAt)}`
+    : data?.configured ? 'No pending schedules.' : 'Configure a computer backend to use background work.';
+  $('background-next').classList.toggle('empty-panel', !data?.nextWakeAt);
+
+  $('background-schedules').replaceChildren(...schedules.slice(0, 6).map((schedule) => {
+    const row = element('div', 'background-row');
+    const body = element('div', 'background-row-body');
+    const kind = schedule.cronExpression
+      ? `${schedule.cronExpression} · ${schedule.timeZone}`
+      : schedule.repeatEveryMs
+        ? `Every ${Math.round(schedule.repeatEveryMs / 1000)}s`
+        : 'One-shot';
+    body.append(
+      element('strong', '', `${backgroundStateBadge(schedule.state)} ${kind}`),
+      element('small', '', `${schedule.state} · ${formatBackgroundTime(schedule.runAt)}`),
+    );
+    row.append(body);
+    if (schedule.state === 'pending') {
+      const cancel = element('button', 'background-action', '×');
+      cancel.type = 'button';
+      cancel.title = 'Cancel schedule';
+      cancel.onclick = async () => {
+        try {
+          await api.cancelSchedule(schedule.scheduleId);
+          await refreshBackground();
+        } catch (error) {
+          showError(error);
+        }
+      };
+      row.append(cancel);
+    }
+    return row;
+  }));
+
+  $('background-jobs').replaceChildren(...jobs.slice(0, 6).map((job) => {
+    const button = element('button', 'background-row background-job');
+    button.type = 'button';
+    const body = element('div', 'background-row-body');
+    body.append(
+      element('strong', '', `${backgroundStateBadge(job.state)} Job ${job.jobId.slice(0, 8)}`),
+      element('small', '', [job.state, job.exitCode === undefined ? '' : `exit ${job.exitCode}`].filter(Boolean).join(' · ')),
+    );
+    button.append(body, element('span', 'background-chevron', '›'));
+    button.onclick = () => void openJobOutput(job);
+    return button;
+  }));
+
+  if (!schedules.length) $('background-schedules').replaceChildren();
+  if (!jobs.length) $('background-jobs').replaceChildren();
+}
+
+async function refreshBackground() {
+  if (backgroundLoading || !current) return;
+  backgroundLoading = true;
+  $('background-refresh').disabled = true;
+  try {
+    renderBackground(await api.backgroundState());
+  } catch (error) {
+    $('background-next').textContent = error.message.replace(/^Error invoking remote method '[^']+': Error: /, '');
+    $('background-next').classList.add('empty-panel');
+  } finally {
+    backgroundLoading = false;
+    $('background-refresh').disabled = false;
+  }
+}
+
 function render(state) {
   current = state;
   const { config, history, busy, task, memory, events, approval } = state;
@@ -126,6 +222,10 @@ function render(state) {
   $('stop').disabled = !busy;
   $('new-chat').disabled = locked;
   renderSessions(state, locked);
+  if (backgroundSessionId !== state.activeSessionId) {
+    backgroundSessionId = state.activeSessionId;
+    void refreshBackground();
+  }
   $('settings-button').disabled = locked;
   $('memory-input').disabled = locked;
   $('memory-form').querySelector('button').disabled = locked;
@@ -306,8 +406,17 @@ $('memory-form').onsubmit = async (event) => {
   if (current.busy || !$('memory-input').value.trim()) return;
   try { await api.remember($('memory-input').value); $('memory-input').value = ''; } catch (error) { showError(error); }
 };
+$('background-refresh').onclick = () => void refreshBackground();
+$('close-background-job').onclick = () => $('background-job-dialog').close();
+
 api.onEvent(({ type, data }) => {
   if (type === 'state') render(data);
-  if (type === 'agent') { progressEvent = data; renderProgress(); }
+  if (type === 'agent') {
+    progressEvent = data;
+    renderProgress();
+    if (data.type === 'run_end' || data.type === 'run_error' || data.type === 'run_cancelled') {
+      void refreshBackground();
+    }
+  }
 });
 try { render(await api.state()); if (!current.config.configured) settings(); } catch (error) { showError(error); }
