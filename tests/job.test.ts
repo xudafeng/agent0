@@ -41,7 +41,9 @@ function fakeComputer() {
           };
         }
         if (script.startsWith('if [ -f ')) {
-          const exitEntry = [...files.entries()].find(([path]) => path.endsWith('/exit-code'));
+          const exitEntry = [...files.entries()].find(([path]) =>
+            path.endsWith('/exit-code') && script.includes(path)
+          );
           return exitEntry
             ? { exitCode: 0, stdout: exitEntry[1], stderr: '' }
             : { exitCode: 44, stdout: '', stderr: '' };
