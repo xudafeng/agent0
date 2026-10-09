@@ -179,6 +179,7 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
           taskRuntime.getState(),
           skills.context(),
           computerContext,
+          {},
           formatPersonalState(personalState),
         );
         const routed = await route?.(context, tools, signal);
