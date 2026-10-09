@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { CronExpressionParser } from 'cron-parser';
 import type { Computer } from './computer.js';
 import { startDurableJob, type DurableJob } from './job.js';
 import type { DetachedProcessStartInput } from './computer-process.js';
@@ -18,6 +19,8 @@ export interface ScheduledJob {
   jobId?: string;
   error?: string;
   repeatEveryMs?: number;
+  cronExpression?: string;
+  timeZone?: string;
   runCount?: number;
 }
 
@@ -28,10 +31,17 @@ interface ScheduleIndex {
 
 export interface DurableScheduler {
   schedule(input: DetachedProcessStartInput, runAt: string, repeatEveryMs?: number): Promise<ScheduledJob>;
+  scheduleCron(input: DetachedProcessStartInput, cronExpression: string, timeZone: string): Promise<ScheduledJob>;
   get(scheduleId: string): Promise<ScheduledJob>;
   list(): Promise<ScheduledJob[]>;
   cancel(scheduleId: string): Promise<ScheduledJob>;
+  wake(now?: Date | string | number): Promise<{ triggered: string[]; nextWakeAt?: string }>;
+  nextWakeAt(): string | undefined;
   close(): Promise<void>;
+}
+
+export interface DurableSchedulerOptions {
+  armTimers?: boolean;
 }
 
 function assertScheduleId(scheduleId: string): void {
@@ -42,6 +52,22 @@ function parseRunAt(runAt: string): string {
   const date = new Date(runAt);
   if (!Number.isFinite(date.getTime())) throw new Error('Invalid schedule time.');
   return date.toISOString();
+}
+
+export function nextCronRunAt(
+  cronExpression: string,
+  timeZone: string,
+  currentDate: Date | string | number = new Date(),
+): string {
+  const expression = cronExpression.trim();
+  const zone = timeZone.trim();
+  if (!expression) throw new Error('Cron expression cannot be empty.');
+  if (!zone) throw new Error('Cron timezone cannot be empty.');
+  const interval = CronExpressionParser.parse(expression, {
+    currentDate,
+    tz: zone,
+  });
+  return interval.next().toDate().toISOString();
 }
 
 function validateIndex(parsed: unknown): ScheduleIndex {
@@ -64,6 +90,14 @@ function validateIndex(parsed: unknown): ScheduleIndex {
         (!Number.isFinite(value.repeatEveryMs) || value.repeatEveryMs <= 0)) {
       throw new Error('Invalid schedule interval.');
     }
+    if (value.cronExpression !== undefined || value.timeZone !== undefined) {
+      if (typeof value.cronExpression !== 'string' || !value.cronExpression.trim() ||
+          typeof value.timeZone !== 'string' || !value.timeZone.trim()) {
+        throw new Error('Invalid cron schedule.');
+      }
+      if (value.repeatEveryMs !== undefined) throw new Error('Schedule cannot use both interval and cron recurrence.');
+      nextCronRunAt(value.cronExpression, value.timeZone, new Date(value.runAt).getTime() - 1);
+    }
     if (value.runCount !== undefined &&
         (!Number.isInteger(value.runCount) || value.runCount < 0)) {
       throw new Error('Invalid schedule run count.');
@@ -72,8 +106,12 @@ function validateIndex(parsed: unknown): ScheduleIndex {
   return index as ScheduleIndex;
 }
 
-export async function createDurableScheduler(computer: Computer): Promise<DurableScheduler> {
+export async function createDurableScheduler(
+  computer: Computer,
+  options: DurableSchedulerOptions = {},
+): Promise<DurableScheduler> {
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
+  const armTimers = options.armTimers ?? true;
   let closed = false;
   let index: ScheduleIndex = { version: 1, schedules: [] };
   let lock = Promise.resolve();
@@ -124,7 +162,10 @@ export async function createDurableScheduler(computer: Computer): Promise<Durabl
         schedule.runCount = (schedule.runCount ?? 0) + 1;
         delete schedule.error;
 
-        if (schedule.repeatEveryMs !== undefined) {
+        if (schedule.cronExpression !== undefined && schedule.timeZone !== undefined) {
+          schedule.state = 'pending';
+          schedule.runAt = nextCronRunAt(schedule.cronExpression, schedule.timeZone);
+        } else if (schedule.repeatEveryMs !== undefined) {
           schedule.state = 'pending';
           schedule.runAt = new Date(Date.now() + schedule.repeatEveryMs).toISOString();
         } else {
@@ -141,7 +182,7 @@ export async function createDurableScheduler(computer: Computer): Promise<Durabl
   };
 
   const arm = (schedule: ScheduledJob) => {
-    if (closed || schedule.state !== 'pending') return;
+    if (!armTimers || closed || schedule.state !== 'pending') return;
     clearTimer(schedule.scheduleId);
     const delay = new Date(schedule.runAt).getTime() - Date.now();
     if (delay <= 0) {
@@ -156,6 +197,14 @@ export async function createDurableScheduler(computer: Computer): Promise<Durabl
       void trigger(schedule.scheduleId);
     }, Math.min(delay, MAX_TIMER_DELAY_MS));
     timers.set(schedule.scheduleId, timer);
+  };
+
+  const getNextWakeAt = (): string | undefined => {
+    const pending = index.schedules
+      .filter((schedule) => schedule.state === 'pending')
+      .map((schedule) => schedule.runAt)
+      .sort();
+    return pending[0];
   };
 
   for (const schedule of index.schedules) arm(schedule);
@@ -187,6 +236,27 @@ export async function createDurableScheduler(computer: Computer): Promise<Durabl
       });
     },
 
+    async scheduleCron(input, cronExpression, timeZone) {
+      return exclusive(async () => {
+        if (closed) throw new Error('Scheduler is closed.');
+        const runAt = nextCronRunAt(cronExpression, timeZone);
+        const schedule: ScheduledJob = {
+          scheduleId: randomUUID(),
+          runAt,
+          state: 'pending',
+          input: structuredClone(input),
+          createdAt: new Date().toISOString(),
+          cronExpression: cronExpression.trim(),
+          timeZone: timeZone.trim(),
+          runCount: 0,
+        };
+        index.schedules.unshift(schedule);
+        await save();
+        arm(schedule);
+        return structuredClone(schedule);
+      });
+    },
+
     async get(scheduleId) {
       assertScheduleId(scheduleId);
       const schedule = index.schedules.find((item) => item.scheduleId === scheduleId);
@@ -209,6 +279,35 @@ export async function createDurableScheduler(computer: Computer): Promise<Durabl
         await save();
         return structuredClone(schedule);
       });
+    },
+
+    async wake(now = new Date()) {
+      if (closed) throw new Error('Scheduler is closed.');
+      const nowMs = new Date(now).getTime();
+      if (!Number.isFinite(nowMs)) throw new Error('Invalid wake time.');
+
+      const due = index.schedules
+        .filter((schedule) =>
+          schedule.state === 'pending' && new Date(schedule.runAt).getTime() <= nowMs
+        )
+        .sort((a, b) => a.runAt.localeCompare(b.runAt))
+        .map((schedule) => schedule.scheduleId);
+
+      const triggered: string[] = [];
+      for (const scheduleId of due) {
+        await trigger(scheduleId);
+        triggered.push(scheduleId);
+      }
+
+      const nextWakeAt = getNextWakeAt();
+      return {
+        triggered,
+        ...(nextWakeAt === undefined ? {} : { nextWakeAt }),
+      };
+    },
+
+    nextWakeAt() {
+      return getNextWakeAt();
     },
 
     async close() {

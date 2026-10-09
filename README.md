@@ -151,3 +151,24 @@ E2B_API_KEY=your_e2b_api_key
 
 When E2B is enabled, the first runtime use of a conversation creates a sandbox and immediately persists its `ComputerRef`. Switching away pauses the sandbox with memory preserved; reopening the conversation or restarting Agent0 reconnects to the same sandbox and workspace.
 
+## Background runtime
+
+Agent0 can persist one-shot, interval, and timezone-aware cron schedules in the current computer workspace and execute them as durable background jobs.
+
+Run one wake cycle manually with:
+
+```bash
+pnpm wake
+```
+
+The wake runner:
+
+- scans sessions with persisted computer bindings
+- reconnects each computer
+- reconciles running/unknown job state
+- starts any schedules that are due
+- reports the earliest `nextWakeAt`
+- suspends pause/resume-capable computers before exiting
+
+This command is intentionally one-shot. An operating-system service or cloud scheduler can invoke `pnpm wake` when needed without coupling Agent0's runtime to a specific platform scheduler.
+

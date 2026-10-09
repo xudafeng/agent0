@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { Computer } from './computer.js';
-import { getDurableJobStatus, readDurableJobOutput, startDurableJob } from './job.js';
+import { getDurableJobStatus, listDurableJobs, readDurableJobOutput, startDurableJob } from './job.js';
 import type { AgentTool } from './tools.js';
 
 const startJobSchema = z.object({
@@ -66,6 +66,22 @@ export function createJobTools(computer: Computer): AgentTool[] {
       execute(toolCall, context) {
         const { jobId } = jobSchema.parse(toolCall.arguments);
         return getDurableJobStatus(computer, jobId, context.signal);
+      },
+    },
+    {
+      definition: {
+        name: 'job_list',
+        description: 'List durable background jobs and their latest persisted states for the current computer workspace.',
+        parameters: {
+          type: 'object',
+          properties: {},
+          additionalProperties: false,
+        },
+      },
+      executionMode: 'sequential',
+      idempotency: 'idempotent',
+      execute(_toolCall, context) {
+        return listDurableJobs(computer, context.signal);
       },
     },
     {

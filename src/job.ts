@@ -25,6 +25,13 @@ export interface DurableJobOutput {
   stderr: string;
 }
 
+interface JobIndex {
+  version: 1;
+  jobs: DurableJob[];
+}
+
+const JOB_INDEX_PATH = '.agent0/jobs/index.json';
+
 function assertJobId(jobId: string): void {
   if (!/^[a-zA-Z0-9_-]+$/.test(jobId)) throw new Error('Invalid job ID.');
 }
@@ -34,8 +41,32 @@ function jobPath(jobId: string): string {
   return `.agent0/jobs/${jobId}.json`;
 }
 
+async function loadJobIndex(computer: Computer, signal?: AbortSignal): Promise<JobIndex> {
+  const probe = await computer.exec({
+    command: 'sh',
+    args: ['-lc', `if [ -f '${JOB_INDEX_PATH}' ]; then printf exists; else printf missing; fi`],
+  }, signal);
+  if (probe.exitCode !== 0 || probe.stdout.trim() !== 'exists') {
+    return { version: 1, jobs: [] };
+  }
+
+  const parsed: unknown = JSON.parse(await computer.readTextFile(JOB_INDEX_PATH, signal));
+  if (!parsed || typeof parsed !== 'object') throw new Error('Invalid durable job index.');
+  const index = parsed as Partial<JobIndex>;
+  if (index.version !== 1 || !Array.isArray(index.jobs)) throw new Error('Invalid durable job index.');
+  return {
+    version: 1,
+    jobs: index.jobs.map((job) => validateJob(job, (job as DurableJob).jobId)),
+  };
+}
+
 async function saveJob(computer: Computer, job: DurableJob, signal?: AbortSignal): Promise<void> {
   await computer.writeTextFile(jobPath(job.jobId), `${JSON.stringify(job, null, 2)}\n`, signal);
+  const index = await loadJobIndex(computer, signal);
+  const existing = index.jobs.findIndex((item) => item.jobId === job.jobId);
+  if (existing >= 0) index.jobs[existing] = structuredClone(job);
+  else index.jobs.unshift(structuredClone(job));
+  await computer.writeTextFile(JOB_INDEX_PATH, `${JSON.stringify(index, null, 2)}\n`, signal);
 }
 
 function validateJob(parsed: unknown, jobId: string): DurableJob {
@@ -135,4 +166,28 @@ export async function readDurableJobOutput(
     stdout: output.stdout,
     stderr: output.stderr,
   };
+}
+
+
+export async function listDurableJobs(
+  computer: Computer,
+  signal?: AbortSignal,
+): Promise<DurableJob[]> {
+  return structuredClone((await loadJobIndex(computer, signal)).jobs);
+}
+
+export async function reconcileDurableJobs(
+  computer: Computer,
+  signal?: AbortSignal,
+): Promise<DurableJob[]> {
+  const jobs = await listDurableJobs(computer, signal);
+  const reconciled: DurableJob[] = [];
+  for (const job of jobs) {
+    if (job.state === 'running' || job.state === 'starting' || job.state === 'unknown') {
+      reconciled.push(await getDurableJobStatus(computer, job.jobId, signal));
+    } else {
+      reconciled.push(job);
+    }
+  }
+  return reconciled;
 }
