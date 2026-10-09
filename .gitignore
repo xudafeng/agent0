@@ -6,7 +6,6 @@ node_modules
 dist
 release
 .pnpm-store
-data/memory.md
-data/traces.ndjson
+data/
 package-lock.json
 pnpm-lock.yaml
