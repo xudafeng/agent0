@@ -15,6 +15,8 @@ let backgroundSessionId = '';
 let backgroundLoading = false;
 let memoryEntries = [];
 let memorySearchTimer;
+let personalStateCache;
+let personalLoading = false;
 
 applyLanguage();
 const mcpSettings = setupMcpSettings();
@@ -116,6 +118,104 @@ function renderSessions(state, locked) {
   $('active-session-title').textContent = active?.title || t('Conversation');
 }
 
+
+
+function personalStatusIcon(status) {
+  return status === 'completed' ? '✓' : status === 'in_progress' ? '◉' : '○';
+}
+
+function renderPersonalState(state) {
+  personalStateCache = state;
+  $('personal-focus').textContent = state.dailyFocus || 'No daily focus.';
+  $('personal-focus').classList.toggle('empty-panel', !state.dailyFocus);
+
+  const activeTasks = state.tasks.filter((task) => task.status !== 'completed').slice(0, 5);
+  $('personal-tasks').replaceChildren(...activeTasks.map((task) => {
+    const row = element('div', 'personal-row');
+    row.append(
+      element('span', 'personal-status', personalStatusIcon(task.status)),
+      element('span', 'personal-row-text', task.title),
+    );
+    return row;
+  }));
+
+  $('personal-goals').replaceChildren(...state.goals.slice(0, 4).map((goal) => {
+    const row = element('div', 'personal-row personal-goal-row');
+    row.append(element('span', 'personal-status', '◎'), element('span', 'personal-row-text', goal.title));
+    return row;
+  }));
+}
+
+async function refreshPersonalState() {
+  if (personalLoading) return;
+  personalLoading = true;
+  try {
+    renderPersonalState(await api.personalState());
+  } catch (error) {
+    $('personal-focus').textContent = error.message.replace(/^Error invoking remote method '[^']+': Error: /, '');
+    $('personal-focus').classList.add('empty-panel');
+  } finally {
+    personalLoading = false;
+  }
+}
+
+function renderPersonalManager(state) {
+  $('personal-focus-input').value = state.dailyFocus;
+
+  $('personal-goal-list').replaceChildren(...state.goals.map((goal) => {
+    const row = element('div', 'personal-manager-row');
+    row.append(element('span', 'personal-manager-title', goal.title));
+    const remove = element('button', 'personal-remove', '×');
+    remove.type = 'button';
+    remove.title = 'Remove goal';
+    remove.onclick = async () => {
+      try {
+        await api.personalRemoveGoal(goal.id);
+        const next = await api.personalState();
+        renderPersonalState(next);
+        renderPersonalManager(next);
+      } catch (error) {
+        showError(error);
+      }
+    };
+    row.append(remove);
+    return row;
+  }));
+
+  const goalOptions = [element('option', '', 'No goal')];
+  goalOptions[0].value = '';
+  for (const goal of state.goals) {
+    const option = element('option', '', goal.title);
+    option.value = goal.id;
+    goalOptions.push(option);
+  }
+  $('personal-task-goal').replaceChildren(...goalOptions);
+
+  $('personal-task-list').replaceChildren(...state.tasks.slice().sort((a, b) =>
+    a.status === 'completed' && b.status !== 'completed' ? 1 :
+    a.status !== 'completed' && b.status === 'completed' ? -1 : 0
+  ).map((task) => {
+    const row = element('div', 'personal-manager-row');
+    const toggle = element('button', 'personal-task-toggle', personalStatusIcon(task.status));
+    toggle.type = 'button';
+    toggle.title = task.status === 'completed' ? 'Reopen task' : 'Advance task';
+    toggle.onclick = async () => {
+      const status = task.status === 'pending' ? 'in_progress' : task.status === 'in_progress' ? 'completed' : 'pending';
+      try {
+        await api.personalUpdateTask({ id: task.id, status });
+        const next = await api.personalState();
+        renderPersonalState(next);
+        renderPersonalManager(next);
+      } catch (error) {
+        showError(error);
+      }
+    };
+    const body = element('span', 'personal-manager-title', task.title);
+    if (task.status === 'completed') body.classList.add('completed');
+    row.append(toggle, body);
+    return row;
+  }));
+}
 
 function formatBackgroundTime(value) {
   if (!value) return '';
@@ -533,6 +633,51 @@ $('memory-search').oninput = () => {
   clearTimeout(memorySearchTimer);
   memorySearchTimer = setTimeout(() => void refreshMemoryManager(), 150);
 };
+$('personal-manage').onclick = async () => {
+  const state = await api.personalState();
+  renderPersonalState(state);
+  renderPersonalManager(state);
+  $('personal-dialog').showModal();
+};
+$('close-personal-dialog').onclick = () => $('personal-dialog').close();
+$('personal-focus-save').onclick = async () => {
+  try {
+    const state = await api.personalSetFocus($('personal-focus-input').value);
+    renderPersonalState(state);
+    renderPersonalManager(state);
+  } catch (error) {
+    showError(error);
+  }
+};
+$('personal-goal-form').onsubmit = async (event) => {
+  event.preventDefault();
+  const title = $('personal-goal-input').value.trim();
+  if (!title) return;
+  try {
+    await api.personalAddGoal(title);
+    $('personal-goal-input').value = '';
+    const state = await api.personalState();
+    renderPersonalState(state);
+    renderPersonalManager(state);
+  } catch (error) {
+    showError(error);
+  }
+};
+$('personal-task-form').onsubmit = async (event) => {
+  event.preventDefault();
+  const title = $('personal-task-input').value.trim();
+  if (!title) return;
+  try {
+    await api.personalAddTask(title, $('personal-task-goal').value || undefined);
+    $('personal-task-input').value = '';
+    const state = await api.personalState();
+    renderPersonalState(state);
+    renderPersonalManager(state);
+  } catch (error) {
+    showError(error);
+  }
+};
+
 $('background-refresh').onclick = () => void refreshBackground();
 $('close-background-job').onclick = () => $('background-job-dialog').close();
 
@@ -543,7 +688,14 @@ api.onEvent(({ type, data }) => {
     renderProgress();
     if (data.type === 'run_end' || data.type === 'run_error' || data.type === 'run_cancelled') {
       void refreshBackground();
+      void refreshPersonalState();
     }
   }
 });
-try { render(await api.state()); if (!current.config.configured) settings(); } catch (error) { showError(error); }
+try {
+  render(await api.state());
+  await refreshPersonalState();
+  if (!current.config.configured) settings();
+} catch (error) {
+  showError(error);
+}
