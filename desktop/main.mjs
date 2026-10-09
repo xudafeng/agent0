@@ -229,7 +229,7 @@ function text(value, name, limit = 32000) {
 function handle(name, action) {
   ipcMain.handle(`agent:${name}`, async (event, payload) => {
     if (event.sender !== window?.webContents || event.senderFrame !== window.webContents.mainFrame) throw new Error('Unknown sender.');
-    if (name === 'state' || name === 'mcp-list') return action(payload);
+    if (name === 'state' || name === 'mcp-list' || name === 'background-state' || name === 'background-job-output') return action(payload);
     if (busy) throw new Error('Wait for the current operation to finish.');
     busy = true;
     publish('state', state());
