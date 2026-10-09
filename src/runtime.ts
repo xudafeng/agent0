@@ -8,6 +8,8 @@ import { createJevRouter } from './jev.js';
 import { createJobTools } from './job-tools.js';
 import { createFileMemoryStore, formatMemoryEntries, type MemoryEntry, type MemoryScope, type MemoryStore } from './memory.js';
 import { createMemoryTools } from './memory-tools.js';
+import { createFilePersonalStateStore, formatPersonalState, type PersonalState, type PersonalStateStore } from './personal-state.js';
+import { createPersonalStateTools } from './personal-state-tools.js';
 import { connectMcpServers } from './mcp.js';
 import { getProvider, type Message, type Provider } from './provider.js';
 import { createFileRunStore, type RunCheckpoint, type RunStore, type RunStatus } from './run-store.js';
@@ -29,6 +31,7 @@ export interface RuntimeOptions {
   executionLedger?: ToolExecutionLedger;
   computer?: Computer;
   memoryStore?: MemoryStore;
+  personalStateStore?: PersonalStateStore;
 }
 
 export interface RunResult {
@@ -57,6 +60,7 @@ export interface AgentRuntime {
   forgetMemory(id: string): Promise<void>;
   searchMemory(query: string, scope?: MemoryScope): Promise<MemoryEntry[]>;
   getMemory(): string;
+  getPersonalState(): Promise<PersonalState>;
   getTaskState(): TaskState | undefined;
   getSkills(): { skills: SkillSummary[]; diagnostics: string[]; loaded: string[] };
   getSessionState(): RuntimeSessionState;
@@ -78,11 +82,13 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
   const subagentRuntime = createSubagentRuntime(provider);
   const scheduler = options.computer ? await createDurableScheduler(options.computer) : undefined;
   const memoryStore = options.memoryStore ?? createFileMemoryStore();
+  const personalStateStore = options.personalStateStore ?? createFilePersonalStateStore();
   let memory = await memoryStore.render();
   const refreshMemory = async () => { memory = await memoryStore.render(); };
   const toolRegistry = createToolRegistry([
     ...localAgentTools,
     ...createMemoryTools(memoryStore, refreshMemory),
+    ...createPersonalStateTools(personalStateStore),
     ...(options.computer ? [...createComputerTools(options.computer), ...createJobTools(options.computer)] : []),
     ...(scheduler ? createSchedulerTools(scheduler) : []),
     ...adaptToolDefinitions(skills.tools, (toolCall, context) => skills.callTool(toolCall, context.signal), 'sequential'),
@@ -163,13 +169,17 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
         const computerContext = options.computer
           ? `Current computer: ${options.computer.ref.backend} backend, workspace ${options.computer.ref.workspaceId}. Use computer_* tools for direct computer operations, job_* tools for durable background work, and schedule_* tools for future one-shot jobs. E2B is a computer backend, not a skill.`
           : '';
-        const relevantMemory = await memoryStore.search(value, { limit: 12, maxChars: 4000 });
+        const [relevantMemory, personalState] = await Promise.all([
+          memoryStore.search(value, { limit: 12, maxChars: 4000 }),
+          personalStateStore.get(),
+        ]);
         const context = buildContext(
           formatMemoryEntries(relevantMemory),
           messages,
           taskRuntime.getState(),
           skills.context(),
           computerContext,
+          formatPersonalState(personalState),
         );
         const routed = await route?.(context, tools, signal);
         if (routed) {
@@ -451,6 +461,10 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
 
     getMemory() {
       return memory;
+    },
+
+    getPersonalState() {
+      return personalStateStore.get();
     },
 
     getTaskState() {
