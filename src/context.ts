@@ -68,8 +68,8 @@ export function buildContext(
   taskState?: TaskState,
   skillContext = '',
   computerContext = '',
-  personalContext = '',
   budget: Partial<ContextBudget> = {},
+  personalContext = '',
 ): Message[] {
   const limits = { ...DEFAULT_CONTEXT_BUDGET, ...budget };
   const recentConversation = selectRecentConversation(messages, limits.conversationChars);
