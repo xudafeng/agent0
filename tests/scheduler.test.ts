@@ -190,7 +190,9 @@ test('recurring schedule missed while offline catches up once, not once per miss
   assert.equal(schedule.runCount, 5);
   assert.equal(schedule.state, 'pending');
 
-  const jobs = [...fake.files.keys()].filter((path) => path.startsWith('.agent0/jobs/'));
+  const jobs = [...fake.files.keys()].filter((path) =>
+    path.startsWith('.agent0/jobs/') && path !== '.agent0/jobs/index.json'
+  );
   assert.equal(jobs.length, 1);
 });
 
@@ -278,7 +280,9 @@ test('overdue cron schedule catches up once and computes its next cron occurrenc
   assert.equal(schedule.timeZone, 'Asia/Tokyo');
   assert.ok(new Date(schedule.runAt).getTime() > Date.now());
 
-  const jobs = [...fake.files.keys()].filter((path) => path.startsWith('.agent0/jobs/'));
+  const jobs = [...fake.files.keys()].filter((path) =>
+    path.startsWith('.agent0/jobs/') && path !== '.agent0/jobs/index.json'
+  );
   assert.equal(jobs.length, 1);
 });
 
