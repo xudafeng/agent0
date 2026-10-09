@@ -2,6 +2,9 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('agent0', {
   state: () => ipcRenderer.invoke('agent:state'),
+  backgroundState: () => ipcRenderer.invoke('agent:background-state'),
+  cancelSchedule: (scheduleId) => ipcRenderer.invoke('agent:background-cancel-schedule', scheduleId),
+  jobOutput: (jobId) => ipcRenderer.invoke('agent:background-job-output', jobId),
   createSession: (title) => ipcRenderer.invoke('agent:session-create', title),
   switchSession: (id) => ipcRenderer.invoke('agent:session-switch', id),
   renameSession: (id, title) => ipcRenderer.invoke('agent:session-rename', { id, title }),
