@@ -11,6 +11,8 @@ import { connectMcpServers } from './mcp.js';
 import { getProvider, type Message, type Provider } from './provider.js';
 import { createFileRunStore, type RunCheckpoint, type RunStore, type RunStatus } from './run-store.js';
 import { createSkillRuntime, type SkillSummary } from './skills.js';
+import { createDurableScheduler } from './scheduler.js';
+import { createSchedulerTools } from './scheduler-tools.js';
 import { createSubagentRuntime } from './subagent.js';
 import { createTaskRuntime, formatTaskState, type TaskState } from './task.js';
 import { createTraceRecorder } from './trace.js';
@@ -68,9 +70,11 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
   const mcp = await connectMcpServers();
   const taskRuntime = createTaskRuntime();
   const subagentRuntime = createSubagentRuntime(provider);
+  const scheduler = options.computer ? await createDurableScheduler(options.computer) : undefined;
   const toolRegistry = createToolRegistry([
     ...localAgentTools,
     ...(options.computer ? [...createComputerTools(options.computer), ...createJobTools(options.computer)] : []),
+    ...(scheduler ? createSchedulerTools(scheduler) : []),
     ...adaptToolDefinitions(skills.tools, (toolCall, context) => skills.callTool(toolCall, context.signal), 'sequential'),
     ...adaptToolDefinitions(taskRuntime.tools, (toolCall) => taskRuntime.callTool(toolCall), 'sequential'),
     ...adaptToolDefinitions(subagentRuntime.tools, (toolCall, context) => subagentRuntime.callTool(toolCall, context.signal)),
@@ -148,7 +152,7 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
         await emit({ ...base(), type: 'turn_start', step });
 
         const computerContext = options.computer
-          ? `Current computer: ${options.computer.ref.backend} backend, workspace ${options.computer.ref.workspaceId}. Use computer_* tools for direct computer operations and job_* tools for durable background work. E2B is a computer backend, not a skill.`
+          ? `Current computer: ${options.computer.ref.backend} backend, workspace ${options.computer.ref.workspaceId}. Use computer_* tools for direct computer operations, job_* tools for durable background work, and schedule_* tools for future one-shot jobs. E2B is a computer backend, not a skill.`
           : '';
         const context = buildContext(memory, messages, taskRuntime.getState(), skills.context(), computerContext);
         const routed = await route?.(context, tools, signal);
@@ -429,6 +433,7 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
     },
 
     async close() {
+      await scheduler?.close();
       await mcp.close();
     },
   };
