@@ -1296,3 +1296,117 @@ dialog select {
   font-size: 11px;
   line-height: 1.6;
 }
+
+
+/* Persistent memory management */
+
+.memory-section form {
+  gap: 0;
+}
+
+.memory-section select {
+  width: 92px;
+  border: 0;
+  border-right: 1px solid #e0e5e9;
+  background: #f8faf9;
+  padding: 0 7px;
+  font-size: 9px;
+  color: #617067;
+}
+
+#memory-dialog {
+  width: min(720px, 92vw);
+  max-height: 86vh;
+  overflow: auto;
+}
+
+.memory-dialog-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px;
+  gap: 10px;
+  margin: 18px 0;
+}
+
+.memory-dialog-toolbar input,
+.memory-dialog-toolbar select {
+  margin: 0;
+}
+
+.memory-list {
+  display: grid;
+  gap: 10px;
+}
+
+.memory-card {
+  border: 1px solid #e1e6e2;
+  border-radius: 10px;
+  padding: 13px;
+  background: #fbfcfb;
+}
+
+.memory-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 9px;
+}
+
+.memory-scope-badge {
+  padding: 3px 7px;
+  border-radius: 5px;
+  background: #eaf1ed;
+  color: #476553;
+  font-size: 9px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+}
+
+.memory-id {
+  color: #a0a7a2;
+  font-size: 9px;
+}
+
+.memory-card-content {
+  font-size: 12px;
+  line-height: 1.65;
+  color: #49534d;
+  overflow-wrap: anywhere;
+}
+
+.memory-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.memory-card-actions button {
+  padding: 7px 10px;
+  font-size: 10px;
+}
+
+.memory-delete {
+  padding: 7px 10px;
+  color: #9a5446;
+  font-size: 10px;
+}
+
+.memory-edit-content {
+  width: 100%;
+  min-height: 90px;
+  resize: vertical;
+  padding: 10px;
+  border: 1px solid #dbe2dc;
+  border-radius: 7px;
+  background: white;
+  color: #3d4a42;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.memory-edit-scope {
+  width: 160px;
+  margin: 0 0 10px;
+}

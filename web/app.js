@@ -13,6 +13,8 @@ let progressEvent;
 let keepSavedKey = false;
 let backgroundSessionId = '';
 let backgroundLoading = false;
+let memoryEntries = [];
+let memorySearchTimer;
 
 applyLanguage();
 const mcpSettings = setupMcpSettings();
@@ -205,6 +207,111 @@ async function refreshBackground() {
   } finally {
     backgroundLoading = false;
     $('background-refresh').disabled = false;
+  }
+}
+
+
+function memoryScopeLabel(scope) {
+  const labels = {
+    profile: t('Profile'),
+    preferences: t('Preferences'),
+    projects: t('Projects'),
+    working: t('Working memory'),
+    general: t('General'),
+  };
+  return labels[scope] ?? scope;
+}
+
+function memoryCard(entry) {
+  const card = element('article', 'memory-card');
+  card.dataset.memoryId = entry.id;
+  const head = element('div', 'memory-card-head');
+  head.append(
+    element('span', 'memory-scope-badge', memoryScopeLabel(entry.scope)),
+    element('code', 'memory-id', entry.id.slice(0, 8)),
+  );
+
+  const content = element('div', 'memory-card-content', entry.content);
+  const actions = element('div', 'memory-card-actions');
+  const edit = element('button', 'secondary', t('Edit'));
+  edit.type = 'button';
+  const remove = element('button', 'memory-delete', t('Delete'));
+  remove.type = 'button';
+
+  edit.onclick = () => {
+    const textarea = element('textarea', 'memory-edit-content');
+    textarea.value = entry.content;
+    textarea.maxLength = 4000;
+
+    const scope = element('select', 'memory-edit-scope');
+    for (const value of ['profile', 'preferences', 'projects', 'working', 'general']) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = memoryScopeLabel(value);
+      option.selected = value === entry.scope;
+      scope.append(option);
+    }
+
+    const editorActions = element('div', 'memory-card-actions');
+    const cancel = element('button', 'secondary', t('Cancel'));
+    cancel.type = 'button';
+    const save = element('button', 'primary', t('Save'));
+    save.type = 'button';
+    cancel.onclick = () => refreshMemoryManager();
+    save.onclick = async () => {
+      const value = textarea.value.trim();
+      if (!value) return;
+      save.disabled = true;
+      try {
+        await api.memoryUpdate(entry.id, value, scope.value);
+        await refreshMemoryManager();
+        render(await api.state());
+      } catch (error) {
+        showError(error);
+      } finally {
+        save.disabled = false;
+      }
+    };
+    editorActions.append(cancel, save);
+    card.replaceChildren(head, scope, textarea, editorActions);
+    textarea.focus();
+  };
+
+  remove.onclick = async () => {
+    remove.disabled = true;
+    try {
+      await api.memoryForget(entry.id);
+      await refreshMemoryManager();
+      render(await api.state());
+    } catch (error) {
+      showError(error);
+      remove.disabled = false;
+    }
+  };
+
+  actions.append(edit, remove);
+  card.append(head, content, actions);
+  return card;
+}
+
+function renderMemoryManager(entries) {
+  memoryEntries = entries;
+  $('memory-list').replaceChildren(...entries.map(memoryCard));
+  if (!entries.length) {
+    $('memory-list').append(element('div', 'empty-panel', t('No memory found.')));
+  }
+}
+
+async function refreshMemoryManager() {
+  const query = $('memory-search').value.trim();
+  const scope = $('memory-filter').value || undefined;
+  try {
+    const entries = query
+      ? await api.memorySearch(query, scope)
+      : await api.memoryList(scope);
+    renderMemoryManager(entries);
+  } catch (error) {
+    showError(error);
   }
 }
 
@@ -404,7 +511,27 @@ document.addEventListener('keydown', (event) => {
 $('memory-form').onsubmit = async (event) => {
   event.preventDefault();
   if (current.busy || !$('memory-input').value.trim()) return;
-  try { await api.remember($('memory-input').value); $('memory-input').value = ''; } catch (error) { showError(error); }
+  try {
+    await api.memoryAdd($('memory-input').value, $('memory-scope').value);
+    $('memory-input').value = '';
+    render(await api.state());
+    if ($('memory-dialog').open) await refreshMemoryManager();
+  } catch (error) {
+    showError(error);
+  }
+};
+
+$('memory-manage').onclick = async () => {
+  $('memory-search').value = '';
+  $('memory-filter').value = '';
+  await refreshMemoryManager();
+  $('memory-dialog').showModal();
+};
+$('close-memory-dialog').onclick = () => $('memory-dialog').close();
+$('memory-filter').onchange = () => void refreshMemoryManager();
+$('memory-search').oninput = () => {
+  clearTimeout(memorySearchTimer);
+  memorySearchTimer = setTimeout(() => void refreshMemoryManager(), 150);
 };
 $('background-refresh').onclick = () => void refreshBackground();
 $('close-background-job').onclick = () => $('background-job-dialog').close();
