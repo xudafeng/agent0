@@ -1184,3 +1184,115 @@ dialog select {
   font-size: 11px;
   line-height: 1.6;
 }
+
+
+/* Background runtime */
+
+.panel-action {
+  font-size: 14px;
+  color: #7f8983;
+  padding: 2px 5px;
+  border-radius: 5px;
+}
+
+.panel-action:hover {
+  background: #edf1ef;
+  color: #315b4a;
+}
+
+.background-next {
+  margin-bottom: 10px;
+  font-size: 10px;
+  color: #5e7468;
+}
+
+.background-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 0;
+  border-top: 1px solid #eceff1;
+  text-align: left;
+}
+
+.background-row:first-child {
+  border-top: 0;
+}
+
+.background-row-body {
+  min-width: 0;
+  flex: 1;
+}
+
+.background-row strong {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  color: #44524a;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.background-row small {
+  display: block;
+  margin-top: 4px;
+  font-size: 9px;
+  color: #98a09a;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.background-action,
+.background-chevron {
+  flex-shrink: 0;
+  color: #929b95;
+}
+
+.background-action {
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+}
+
+.background-action:hover {
+  background: #ecefed;
+  color: #9a5446;
+}
+
+.background-job:hover {
+  color: #315b4a;
+}
+
+.background-chevron {
+  font-size: 18px;
+}
+
+.background-section {
+  max-height: 300px;
+  overflow: auto;
+}
+
+#background-job-dialog {
+  width: min(680px, 90vw);
+}
+
+#background-job-dialog h3 {
+  margin: 20px 0 8px;
+  font-size: 11px;
+}
+
+.background-output {
+  min-height: 80px;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 12px;
+  border-radius: 8px;
+  background: #f3f5f4;
+  font-size: 11px;
+  line-height: 1.6;
+}
