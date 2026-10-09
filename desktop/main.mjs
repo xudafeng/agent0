@@ -150,8 +150,8 @@ async function getRuntime() {
         if (toolCall.name.startsWith('mcp_')) {
           return { action: 'ask', reason: 'MCP tool requires approval before execution.' };
         }
-        if (toolCall.name === 'computer_exec' || toolCall.name === 'computer_write_file' || toolCall.name === 'computer_start_process' || toolCall.name === 'job_start') {
-          return { action: 'ask', reason: 'Computer command, file change, or background job requires approval before execution.' };
+        if (toolCall.name === 'computer_exec' || toolCall.name === 'computer_write_file' || toolCall.name === 'computer_start_process' || toolCall.name === 'job_start' || toolCall.name === 'schedule_create' || toolCall.name === 'schedule_cancel') {
+          return { action: 'ask', reason: 'Computer command, file change, background job, or schedule change requires approval before execution.' };
         }
         return { action: 'allow' };
       },
