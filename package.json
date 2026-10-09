@@ -14,7 +14,8 @@
     "build": "tsc -p tsconfig.build.json",
     "build:icons": "electron scripts/build-icons.mjs",
     "package": "pnpm build && electron-builder --mac dir",
-    "test:desktop": "pnpm build && electron tests/desktop-smoke.mjs"
+    "test:desktop": "pnpm build && electron tests/desktop-smoke.mjs",
+    "wake": "tsx src/wake.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/client": "^2.0.0",
@@ -24,7 +25,8 @@
     "openai": "^7.15.0",
     "yaml": "^2.9.1",
     "zod": "^4.0.0",
-    "e2b": "^2.53.1"
+    "e2b": "^2.53.1",
+    "cron-parser": "^5.10.0"
   },
   "devDependencies": {
     "@types/node": "^26.5.1",

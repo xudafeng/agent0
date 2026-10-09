@@ -11,6 +11,15 @@ const scheduleCreateSchema = z.object({
   env: z.record(z.string(), z.string()).optional(),
 }).strict();
 
+const cronScheduleSchema = z.object({
+  cronExpression: z.string().trim().min(1),
+  timeZone: z.string().trim().min(1),
+  command: z.string().trim().min(1),
+  args: z.array(z.string()).optional(),
+  cwd: z.string().trim().min(1).optional(),
+  env: z.record(z.string(), z.string()).optional(),
+}).strict();
+
 const scheduleIdSchema = z.object({
   scheduleId: z.string().trim().min(1),
 }).strict();
@@ -49,6 +58,40 @@ export function createSchedulerTools(scheduler: DurableScheduler): AgentTool[] {
           ...(parsed.cwd === undefined ? {} : { cwd: parsed.cwd }),
           ...(parsed.env === undefined ? {} : { env: parsed.env }),
         }, parsed.runAt, parsed.repeatEveryMs);
+      },
+    },
+    {
+      definition: {
+        name: 'schedule_create_cron',
+        description: 'Create a timezone-aware recurring cron schedule for a durable background job.',
+        parameters: {
+          type: 'object',
+          properties: {
+            cronExpression: { type: 'string', description: 'Cron expression describing the recurrence.' },
+            timeZone: { type: 'string', description: 'IANA timezone such as Asia/Tokyo or America/Los_Angeles.' },
+            command: { type: 'string', description: 'Executable to start.' },
+            args: { type: 'array', items: { type: 'string' }, description: 'Command arguments.' },
+            cwd: { type: 'string', description: 'Optional workspace-relative working directory.' },
+            env: {
+              type: 'object',
+              additionalProperties: { type: 'string' },
+              description: 'Optional environment variables for the cron job.',
+            },
+          },
+          required: ['cronExpression', 'timeZone', 'command'],
+          additionalProperties: false,
+        },
+      },
+      executionMode: 'sequential',
+      idempotency: 'non-idempotent',
+      execute(toolCall) {
+        const parsed = cronScheduleSchema.parse(toolCall.arguments);
+        return scheduler.scheduleCron({
+          command: parsed.command,
+          ...(parsed.args === undefined ? {} : { args: parsed.args }),
+          ...(parsed.cwd === undefined ? {} : { cwd: parsed.cwd }),
+          ...(parsed.env === undefined ? {} : { env: parsed.env }),
+        }, parsed.cronExpression, parsed.timeZone);
       },
     },
     {

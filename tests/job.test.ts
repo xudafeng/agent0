@@ -3,8 +3,10 @@ import test from 'node:test';
 import type { Computer, ComputerExecInput } from '../src/computer.js';
 import {
   getDurableJobStatus,
+  listDurableJobs,
   loadDurableJob,
   readDurableJobOutput,
+  reconcileDurableJobs,
   startDurableJob,
 } from '../src/job.js';
 
@@ -30,6 +32,13 @@ function fakeComputer() {
         const script = input.args[1] ?? '';
         if (script.includes('nohup sh -lc')) {
           return { exitCode: 0, stdout: '4242\n', stderr: '' };
+        }
+        if (script.includes("printf exists") && script.includes('.agent0/jobs/index.json')) {
+          return {
+            exitCode: 0,
+            stdout: files.has('.agent0/jobs/index.json') ? 'exists' : 'missing',
+            stderr: '',
+          };
         }
         if (script.startsWith('if [ -f ')) {
           const exitEntry = [...files.entries()].find(([path]) => path.endsWith('/exit-code'));
@@ -120,3 +129,30 @@ test('durable job output survives later turns through persisted process output',
     },
   );
 });
+
+test('durable job index keeps job history and reconciliation updates terminal state', async () => {
+  const fake = fakeComputer();
+
+  const first = await startDurableJob(fake.computer, { command: 'echo', args: ['one'] });
+  const second = await startDurableJob(fake.computer, { command: 'echo', args: ['two'] });
+
+  fake.files.set('.agent0/jobs/index.json', `${JSON.stringify({
+    version: 1,
+    jobs: [second, first],
+  }, null, 2)}\n`);
+
+  fake.files.set(`.agent0/processes/${first.processId}/exit-code`, '0');
+  fake.files.set(`.agent0/processes/${second.processId}/exit-code`, '9');
+  fake.setRunning(false);
+
+  const reconciled = await reconcileDurableJobs(fake.computer);
+  assert.equal(reconciled.length, 2);
+  assert.equal(reconciled.find((job) => job.jobId === first.jobId)?.state, 'succeeded');
+  assert.equal(reconciled.find((job) => job.jobId === second.jobId)?.state, 'failed');
+
+  const history = await listDurableJobs(fake.computer);
+  assert.equal(history.length, 2);
+  assert.equal(history.find((job) => job.jobId === first.jobId)?.exitCode, 0);
+  assert.equal(history.find((job) => job.jobId === second.jobId)?.exitCode, 9);
+});
+
