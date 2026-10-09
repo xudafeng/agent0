@@ -80,11 +80,11 @@ export async function createDurableScheduler(computer: Computer): Promise<Durabl
     }
   };
 
-  const exists = await computer.exec({
+  const probe = await computer.exec({
     command: 'sh',
-    args: ['-lc', `test -f '${INDEX_PATH}'`],
+    args: ['-lc', `if [ -f '${INDEX_PATH}' ]; then printf exists; else printf missing; fi`],
   });
-  if (exists.exitCode === 0) {
+  if (probe.exitCode === 0 && probe.stdout.trim() === 'exists') {
     index = validateIndex(JSON.parse(await computer.readTextFile(INDEX_PATH)) as unknown);
   } else {
     await computer.writeTextFile(INDEX_PATH, `${JSON.stringify(index, null, 2)}\n`);
