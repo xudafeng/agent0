@@ -128,3 +128,88 @@ test('scheduler list survives recreation from workspace state', async () => {
     await second.close();
   }
 });
+
+test('recurring schedule re-arms after each successful trigger', async (t) => {
+  const scheduleId = 'recurring-existing';
+  const intervalMs = 60_000;
+  const index = {
+    version: 1,
+    schedules: [{
+      scheduleId,
+      runAt: new Date(Date.now() - 5_000).toISOString(),
+      state: 'pending',
+      input: { command: 'echo', args: ['tick'] },
+      createdAt: new Date(Date.now() - 120_000).toISOString(),
+      repeatEveryMs: intervalMs,
+      runCount: 0,
+    }],
+  };
+  const fake = fakeComputer({
+    '.agent0/schedules/index.json': `${JSON.stringify(index, null, 2)}\n`,
+  });
+
+  const before = Date.now();
+  const scheduler = await createDurableScheduler(fake.computer);
+  t.after(() => scheduler.close());
+  await flushAsyncWork();
+
+  const schedule = await scheduler.get(scheduleId);
+  assert.equal(schedule.state, 'pending');
+  assert.equal(schedule.runCount, 1);
+  assert.match(schedule.jobId ?? '', /^[a-zA-Z0-9_-]+$/);
+
+  const nextRun = new Date(schedule.runAt).getTime();
+  assert.ok(nextRun >= before + intervalMs);
+  assert.ok(nextRun <= Date.now() + intervalMs + 1_000);
+});
+
+test('recurring schedule missed while offline catches up once, not once per missed interval', async (t) => {
+  const scheduleId = 'recurring-overdue';
+  const intervalMs = 1_000;
+  const index = {
+    version: 1,
+    schedules: [{
+      scheduleId,
+      runAt: new Date(Date.now() - 60_000).toISOString(),
+      state: 'pending',
+      input: { command: 'echo', args: ['catch-up'] },
+      createdAt: new Date(Date.now() - 120_000).toISOString(),
+      repeatEveryMs: intervalMs,
+      runCount: 4,
+    }],
+  };
+  const fake = fakeComputer({
+    '.agent0/schedules/index.json': `${JSON.stringify(index, null, 2)}\n`,
+  });
+
+  const scheduler = await createDurableScheduler(fake.computer);
+  t.after(() => scheduler.close());
+  await flushAsyncWork();
+
+  const schedule = await scheduler.get(scheduleId);
+  assert.equal(schedule.runCount, 5);
+  assert.equal(schedule.state, 'pending');
+
+  const jobs = [...fake.files.keys()].filter((path) => path.startsWith('.agent0/jobs/'));
+  assert.equal(jobs.length, 1);
+});
+
+test('recurring schedule can be cancelled between runs', async (t) => {
+  const fake = fakeComputer();
+  const scheduler = await createDurableScheduler(fake.computer);
+  t.after(() => scheduler.close());
+
+  const schedule = await scheduler.schedule(
+    { command: 'echo', args: ['tick'] },
+    new Date(Date.now() + 60_000).toISOString(),
+    60_000,
+  );
+
+  assert.equal(schedule.repeatEveryMs, 60_000);
+  assert.equal(schedule.runCount, 0);
+
+  const cancelled = await scheduler.cancel(schedule.scheduleId);
+  assert.equal(cancelled.state, 'cancelled');
+  assert.equal(cancelled.repeatEveryMs, 60_000);
+});
+
