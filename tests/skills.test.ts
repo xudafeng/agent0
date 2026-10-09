@@ -37,8 +37,10 @@ test('discovers metadata, applies directory precedence, and loads body only on d
   assert.ok(!runtime.context().includes('User instructions.'));
   const messages: Message[] = Array.from({ length: 6 }, (_, i) => ({ role: 'user', content: `turn ${i}` }));
   const context = buildContext('', messages, undefined, runtime.context());
-  assert.equal(context.length, 5);
+  assert.equal(context.length, 7);
   assert.ok(context[0] && 'content' in context[0] && context[0].content.includes('Project instructions.'));
+  assert.ok(context.some((message) => message.role === 'user' && 'content' in message && message.content === 'turn 0'));
+  assert.ok(context.some((message) => message.role === 'user' && 'content' in message && message.content === 'turn 5'));
   const fresh = await createSkillRuntime([join(root, 'project')]);
   assert.ok(!fresh.context().includes('Project instructions.'));
   assert.deepEqual(fresh.loaded(), []);
