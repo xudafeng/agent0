@@ -17,6 +17,8 @@ export interface ScheduledJob {
   startedAt?: string;
   jobId?: string;
   error?: string;
+  repeatEveryMs?: number;
+  runCount?: number;
 }
 
 interface ScheduleIndex {
@@ -25,7 +27,7 @@ interface ScheduleIndex {
 }
 
 export interface DurableScheduler {
-  schedule(input: DetachedProcessStartInput, runAt: string): Promise<ScheduledJob>;
+  schedule(input: DetachedProcessStartInput, runAt: string, repeatEveryMs?: number): Promise<ScheduledJob>;
   get(scheduleId: string): Promise<ScheduledJob>;
   list(): Promise<ScheduledJob[]>;
   cancel(scheduleId: string): Promise<ScheduledJob>;
@@ -58,6 +60,14 @@ function validateIndex(parsed: unknown): ScheduleIndex {
     }
     assertScheduleId(value.scheduleId);
     parseRunAt(value.runAt);
+    if (value.repeatEveryMs !== undefined &&
+        (!Number.isFinite(value.repeatEveryMs) || value.repeatEveryMs <= 0)) {
+      throw new Error('Invalid schedule interval.');
+    }
+    if (value.runCount !== undefined &&
+        (!Number.isInteger(value.runCount) || value.runCount < 0)) {
+      throw new Error('Invalid schedule run count.');
+    }
   }
   return index as ScheduleIndex;
 }
@@ -110,14 +120,23 @@ export async function createDurableScheduler(computer: Computer): Promise<Durabl
 
       try {
         const job: DurableJob = await startDurableJob(computer, schedule.input);
-        schedule.state = 'started';
         schedule.jobId = job.jobId;
+        schedule.runCount = (schedule.runCount ?? 0) + 1;
+        delete schedule.error;
+
+        if (schedule.repeatEveryMs !== undefined) {
+          schedule.state = 'pending';
+          schedule.runAt = new Date(Date.now() + schedule.repeatEveryMs).toISOString();
+        } else {
+          schedule.state = 'started';
+        }
       } catch (error) {
         schedule.state = 'failed';
         schedule.error = error instanceof Error ? error.message : String(error);
       }
       await save();
       clearTimer(scheduleId);
+      if (schedule.state === 'pending') arm(schedule);
     });
   };
 
@@ -142,12 +161,16 @@ export async function createDurableScheduler(computer: Computer): Promise<Durabl
   for (const schedule of index.schedules) arm(schedule);
 
   return {
-    async schedule(input, runAt) {
+    async schedule(input, runAt, repeatEveryMs) {
       return exclusive(async () => {
         if (closed) throw new Error('Scheduler is closed.');
         const normalizedRunAt = parseRunAt(runAt);
         if (new Date(normalizedRunAt).getTime() <= Date.now()) {
           throw new Error('Schedule time must be in the future.');
+        }
+        if (repeatEveryMs !== undefined &&
+            (!Number.isFinite(repeatEveryMs) || repeatEveryMs <= 0)) {
+          throw new Error('Schedule interval must be a positive number.');
         }
         const schedule: ScheduledJob = {
           scheduleId: randomUUID(),
@@ -155,6 +178,7 @@ export async function createDurableScheduler(computer: Computer): Promise<Durabl
           state: 'pending',
           input: structuredClone(input),
           createdAt: new Date().toISOString(),
+          ...(repeatEveryMs === undefined ? {} : { repeatEveryMs, runCount: 0 }),
         };
         index.schedules.unshift(schedule);
         await save();
