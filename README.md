@@ -191,3 +191,27 @@ Before each model turn, Agent0 retrieves memory relevant to the current prompt a
 
 The desktop Memory panel supports scoped saves plus search, edit, and delete operations.
 
+## Personal agent state
+
+Agent0 keeps operational personal state separate from long-term memory.
+
+```
+data/personal/
+├── state.json
+└── daily/
+    └── YYYY-MM-DD.md
+```
+
+The persistent state tracks:
+
+- daily focus
+- long-term goals
+- active and completed tasks
+- short daily working notes
+
+Unlike retrieved memory, personal state is injected into every model turn so the agent can continue current work without requiring the user to restate active goals and tasks.
+
+Agent tools can read and update personal state, while desktop-initiated mutations remain directly controllable from the **Today** panel. Model-initiated state changes require approval.
+
+Daily journal entries are appended as readable Markdown and remain separate from the machine-oriented current state.
+
