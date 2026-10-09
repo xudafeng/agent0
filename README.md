@@ -172,3 +172,22 @@ The wake runner:
 
 This command is intentionally one-shot. An operating-system service or cloud scheduler can invoke `pnpm wake` when needed without coupling Agent0's runtime to a specific platform scheduler.
 
+## Persistent memory
+
+Agent0 stores durable memory as readable Markdown under:
+
+```
+data/memory/
+├── profile.md
+├── preferences.md
+├── projects.md
+├── working.md
+└── general.md
+```
+
+Memory entries have stable IDs and can be searched, updated, moved between scopes, or deleted. Existing `data/memory.md` bullet entries are migrated into `general.md` on first use.
+
+Before each model turn, Agent0 retrieves memory relevant to the current prompt and injects only the selected entries into context. Memory, conversation, skills, task state, and computer context each have independent character budgets.
+
+The desktop Memory panel supports scoped saves plus search, edit, and delete operations.
+
