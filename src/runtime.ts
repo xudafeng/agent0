@@ -5,6 +5,7 @@ import { createComputerTools } from './computer-tools.js';
 import type { AgentEvent, AgentEventHandler } from './events.js';
 import { createFileToolExecutionLedger, createToolExecutionId, ToolExecutionUncertainError, type ToolExecutionLedger, type ToolExecutionRecord } from './execution-ledger.js';
 import { createJevRouter } from './jev.js';
+import { createJobTools } from './job-tools.js';
 import { loadMemory, remember as persistMemory } from './memory.js';
 import { connectMcpServers } from './mcp.js';
 import { getProvider, type Message, type Provider } from './provider.js';
@@ -69,7 +70,7 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
   const subagentRuntime = createSubagentRuntime(provider);
   const toolRegistry = createToolRegistry([
     ...localAgentTools,
-    ...(options.computer ? createComputerTools(options.computer) : []),
+    ...(options.computer ? [...createComputerTools(options.computer), ...createJobTools(options.computer)] : []),
     ...adaptToolDefinitions(skills.tools, (toolCall, context) => skills.callTool(toolCall, context.signal), 'sequential'),
     ...adaptToolDefinitions(taskRuntime.tools, (toolCall) => taskRuntime.callTool(toolCall), 'sequential'),
     ...adaptToolDefinitions(subagentRuntime.tools, (toolCall, context) => subagentRuntime.callTool(toolCall, context.signal)),
@@ -147,7 +148,7 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
         await emit({ ...base(), type: 'turn_start', step });
 
         const computerContext = options.computer
-          ? `Current computer: ${options.computer.ref.backend} backend, workspace ${options.computer.ref.workspaceId}. Use the computer_* tools to execute commands and access files in this computer. E2B is a computer backend, not a skill.`
+          ? `Current computer: ${options.computer.ref.backend} backend, workspace ${options.computer.ref.workspaceId}. Use computer_* tools for direct computer operations and job_* tools for durable background work. E2B is a computer backend, not a skill.`
           : '';
         const context = buildContext(memory, messages, taskRuntime.getState(), skills.context(), computerContext);
         const routed = await route?.(context, tools, signal);
