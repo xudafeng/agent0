@@ -118,7 +118,7 @@ export function createFilePersonalStateStore(root = 'data/personal'): PersonalSt
 
   const load = async (): Promise<PersonalState> => {
     try {
-      return stateSchema.parse(JSON.parse(await readFile(statePath, 'utf8')));
+      return stateSchema.parse(JSON.parse(await readFile(statePath, 'utf8'))) as PersonalState;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       const state = emptyState();
@@ -163,9 +163,11 @@ export function createFilePersonalStateStore(root = 'data/personal'): PersonalSt
       const state = await load();
       if (!state.goals.some((goal) => goal.id === id)) throw new Error(`Goal not found: ${id}`);
       state.goals = state.goals.filter((goal) => goal.id !== id);
-      state.tasks = state.tasks.map((task) =>
-        task.goalId === id ? { ...task, goalId: undefined } : task
-      );
+      state.tasks = state.tasks.map((task) => {
+        if (task.goalId !== id) return task;
+        const { goalId: _goalId, ...unlinked } = task;
+        return unlinked;
+      });
       await save(state);
     },
 
@@ -199,15 +201,18 @@ export function createFilePersonalStateStore(root = 'data/personal'): PersonalSt
       }
       const status = input.status ?? current.status;
       const now = new Date().toISOString();
+      const {
+        goalId: _currentGoalId,
+        completedAt: _currentCompletedAt,
+        ...base
+      } = current;
       const updated: PersonalTask = {
-        ...current,
+        ...base,
         ...(input.title === undefined ? {} : { title: text(input.title, 'Task', 1000) }),
         status,
-        ...(goalId === undefined ? { goalId: undefined } : { goalId }),
+        ...(goalId === undefined ? {} : { goalId }),
         updatedAt: now,
-        ...(status === 'completed'
-          ? { completedAt: current.completedAt ?? now }
-          : { completedAt: undefined }),
+        ...(status === 'completed' ? { completedAt: current.completedAt ?? now } : {}),
       };
       state.tasks[index] = updated;
       await save(state);
