@@ -6,7 +6,8 @@ import type { AgentEvent, AgentEventHandler } from './events.js';
 import { createFileToolExecutionLedger, createToolExecutionId, ToolExecutionUncertainError, type ToolExecutionLedger, type ToolExecutionRecord } from './execution-ledger.js';
 import { createJevRouter } from './jev.js';
 import { createJobTools } from './job-tools.js';
-import { loadMemory, remember as persistMemory } from './memory.js';
+import { createFileMemoryStore, formatMemoryEntries, type MemoryEntry, type MemoryScope, type MemoryStore } from './memory.js';
+import { createMemoryTools } from './memory-tools.js';
 import { connectMcpServers } from './mcp.js';
 import { getProvider, type Message, type Provider } from './provider.js';
 import { createFileRunStore, type RunCheckpoint, type RunStore, type RunStatus } from './run-store.js';
@@ -27,6 +28,7 @@ export interface RuntimeOptions {
   provider?: Provider;
   executionLedger?: ToolExecutionLedger;
   computer?: Computer;
+  memoryStore?: MemoryStore;
 }
 
 export interface RunResult {
@@ -49,7 +51,11 @@ export interface RuntimeSessionState {
 export interface AgentRuntime {
   run(prompt: string, options?: RunOptions): Promise<RunResult>;
   resume(runId: string, options?: RunOptions): Promise<RunResult>;
-  remember(content: string): Promise<void>;
+  remember(content: string, scope?: MemoryScope): Promise<void>;
+  listMemory(scope?: MemoryScope): Promise<MemoryEntry[]>;
+  updateMemory(id: string, content: string, scope?: MemoryScope): Promise<MemoryEntry>;
+  forgetMemory(id: string): Promise<void>;
+  searchMemory(query: string, scope?: MemoryScope): Promise<MemoryEntry[]>;
   getMemory(): string;
   getTaskState(): TaskState | undefined;
   getSkills(): { skills: SkillSummary[]; diagnostics: string[]; loaded: string[] };
@@ -71,8 +77,12 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
   const taskRuntime = createTaskRuntime();
   const subagentRuntime = createSubagentRuntime(provider);
   const scheduler = options.computer ? await createDurableScheduler(options.computer) : undefined;
+  const memoryStore = options.memoryStore ?? createFileMemoryStore();
+  let memory = await memoryStore.render();
+  const refreshMemory = async () => { memory = await memoryStore.render(); };
   const toolRegistry = createToolRegistry([
     ...localAgentTools,
+    ...createMemoryTools(memoryStore, refreshMemory),
     ...(options.computer ? [...createComputerTools(options.computer), ...createJobTools(options.computer)] : []),
     ...(scheduler ? createSchedulerTools(scheduler) : []),
     ...adaptToolDefinitions(skills.tools, (toolCall, context) => skills.callTool(toolCall, context.signal), 'sequential'),
@@ -81,7 +91,6 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
     ...adaptToolDefinitions(mcp.tools, (toolCall, context) => mcp.callTool(toolCall, context.signal)),
   ], options.toolPolicy);
   const tools = toolRegistry.definitions;
-  let memory = await loadMemory();
 
   const getSessionState = (): RuntimeSessionState => {
     const task = taskRuntime.getState();
@@ -154,7 +163,14 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
         const computerContext = options.computer
           ? `Current computer: ${options.computer.ref.backend} backend, workspace ${options.computer.ref.workspaceId}. Use computer_* tools for direct computer operations, job_* tools for durable background work, and schedule_* tools for future one-shot jobs. E2B is a computer backend, not a skill.`
           : '';
-        const context = buildContext(memory, messages, taskRuntime.getState(), skills.context(), computerContext);
+        const relevantMemory = await memoryStore.search(value, { limit: 12, maxChars: 4000 });
+        const context = buildContext(
+          formatMemoryEntries(relevantMemory),
+          messages,
+          taskRuntime.getState(),
+          skills.context(),
+          computerContext,
+        );
         const routed = await route?.(context, tools, signal);
         if (routed) {
           await emit({ ...base(), type: 'jev_decision', step, decision: { ...routed.decision } });
@@ -409,9 +425,28 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
       );
     },
 
-    async remember(content) {
-      await persistMemory(content);
-      memory = await loadMemory();
+    async remember(content, scope) {
+      await memoryStore.remember(content, scope);
+      await refreshMemory();
+    },
+
+    listMemory(scope) {
+      return memoryStore.list(scope);
+    },
+
+    async updateMemory(id, content, scope) {
+      const entry = await memoryStore.update(id, content, scope);
+      await refreshMemory();
+      return entry;
+    },
+
+    async forgetMemory(id) {
+      await memoryStore.forget(id);
+      await refreshMemory();
+    },
+
+    searchMemory(query, scope) {
+      return memoryStore.search(query, scope ? { scopes: [scope] } : undefined);
     },
 
     getMemory() {
