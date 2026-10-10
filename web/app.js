@@ -17,6 +17,8 @@ let memoryEntries = [];
 let memorySearchTimer;
 let personalStateCache;
 let personalLoading = false;
+let autonomyLoading = false;
+let autonomyStateCache;
 
 applyLanguage();
 const mcpSettings = setupMcpSettings();
@@ -119,6 +121,80 @@ function renderSessions(state, locked) {
 }
 
 
+
+
+function missionStatusIcon(status) {
+  return status === 'completed' ? '✓' : status === 'blocked' ? '!' : status === 'in_progress' ? '◉' : '○';
+}
+
+async function openArtifact(artifact) {
+  try {
+    const result = await api.artifactRead(artifact.id);
+    $('artifact-dialog-title').textContent = result.artifact.title;
+    $('artifact-dialog-meta').textContent = [result.artifact.kind, result.artifact.id.slice(0, 8)].join(' · ');
+    $('artifact-dialog-content').textContent = result.content;
+    $('artifact-dialog').showModal();
+  } catch (error) {
+    showError(error);
+  }
+}
+
+function renderAutonomyState(state) {
+  autonomyStateCache = state;
+  const mission = state.activeMission;
+  $('autonomy-empty').hidden = Boolean(mission);
+  $('autonomy-content').hidden = !mission;
+  if (!mission) return;
+
+  $('autonomy-goal').textContent = mission.goal;
+  const completed = mission.tasks.filter((task) => task.status === 'completed').length;
+  $('autonomy-progress').textContent = `${completed}/${mission.tasks.length} · ${mission.status}`;
+
+  $('autonomy-tasks').replaceChildren(...mission.tasks.map((task) => {
+    const row = element('div', 'autonomy-task');
+    row.append(
+      element('span', `autonomy-task-status ${task.status}`, missionStatusIcon(task.status)),
+      element('span', 'autonomy-task-title', task.title),
+    );
+    if (task.result) row.title = task.result;
+    return row;
+  }));
+
+  const evaluation = mission.evaluation;
+  $('autonomy-evaluation').hidden = !evaluation;
+  $('autonomy-evaluation').textContent = evaluation
+    ? `Eval ${Math.round(evaluation.score * 100)}% · ${evaluation.summary}`
+    : '';
+
+  const handoff = mission.handoff?.status === 'pending' ? mission.handoff : undefined;
+  $('autonomy-handoff').hidden = !handoff;
+  $('autonomy-handoff-question').textContent = handoff?.question ?? '';
+  if (!handoff) $('autonomy-handoff-response').value = '';
+
+  const artifacts = state.artifacts.filter((artifact) => mission.artifactIds.includes(artifact.id));
+  $('autonomy-artifacts').replaceChildren(...artifacts.map((artifact) => {
+    const button = element('button', 'autonomy-artifact', `↗ ${artifact.title}`);
+    button.type = 'button';
+    button.onclick = () => void openArtifact(artifact);
+    return button;
+  }));
+}
+
+async function refreshAutonomyState() {
+  if (autonomyLoading) return;
+  autonomyLoading = true;
+  $('autonomy-refresh').disabled = true;
+  try {
+    renderAutonomyState(await api.autonomyState());
+  } catch (error) {
+    $('autonomy-empty').hidden = false;
+    $('autonomy-content').hidden = true;
+    $('autonomy-empty').textContent = error.message.replace(/^Error invoking remote method '[^']+': Error: /, '');
+  } finally {
+    autonomyLoading = false;
+    $('autonomy-refresh').disabled = false;
+  }
+}
 
 function personalStatusIcon(status) {
   return status === 'completed' ? '✓' : status === 'in_progress' ? '◉' : '○';
@@ -633,6 +709,26 @@ $('memory-search').oninput = () => {
   clearTimeout(memorySearchTimer);
   memorySearchTimer = setTimeout(() => void refreshMemoryManager(), 150);
 };
+$('autonomy-refresh').onclick = () => void refreshAutonomyState();
+$('close-artifact-dialog').onclick = () => $('artifact-dialog').close();
+$('autonomy-handoff').onsubmit = async (event) => {
+  event.preventDefault();
+  const mission = autonomyStateCache?.activeMission;
+  const response = $('autonomy-handoff-response').value.trim();
+  if (!mission || !response) return;
+  const button = $('autonomy-handoff').querySelector('button');
+  button.disabled = true;
+  try {
+    await api.resolveHandoff(mission.id, response);
+    $('autonomy-handoff-response').value = '';
+    await refreshAutonomyState();
+  } catch (error) {
+    showError(error);
+  } finally {
+    button.disabled = false;
+  }
+};
+
 $('personal-manage').onclick = async () => {
   const state = await api.personalState();
   renderPersonalState(state);
@@ -689,12 +785,13 @@ api.onEvent(({ type, data }) => {
     if (data.type === 'run_end' || data.type === 'run_error' || data.type === 'run_cancelled') {
       void refreshBackground();
       void refreshPersonalState();
+      void refreshAutonomyState();
     }
   }
 });
 try {
   render(await api.state());
-  await refreshPersonalState();
+  await Promise.all([refreshPersonalState(), refreshAutonomyState()]);
   if (!current.config.configured) settings();
 } catch (error) {
   showError(error);

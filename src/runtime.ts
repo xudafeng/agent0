@@ -10,6 +10,9 @@ import { createFileMemoryStore, formatMemoryEntries, type MemoryEntry, type Memo
 import { createMemoryTools } from './memory-tools.js';
 import { createFilePersonalStateStore, formatPersonalState, type PersonalState, type PersonalStateStore } from './personal-state.js';
 import { createPersonalStateTools } from './personal-state-tools.js';
+import { createFileMissionStore, formatMission, type Mission, type MissionStore } from './autonomy.js';
+import { createFileArtifactStore, type ArtifactStore } from './artifact.js';
+import { createAutonomyTools } from './autonomy-tools.js';
 import { connectMcpServers } from './mcp.js';
 import { getProvider, type Message, type Provider } from './provider.js';
 import { createFileRunStore, type RunCheckpoint, type RunStore, type RunStatus } from './run-store.js';
@@ -32,6 +35,8 @@ export interface RuntimeOptions {
   computer?: Computer;
   memoryStore?: MemoryStore;
   personalStateStore?: PersonalStateStore;
+  missionStore?: MissionStore;
+  artifactStore?: ArtifactStore;
 }
 
 export interface RunResult {
@@ -61,6 +66,7 @@ export interface AgentRuntime {
   searchMemory(query: string, scope?: MemoryScope): Promise<MemoryEntry[]>;
   getMemory(): string;
   getPersonalState(): Promise<PersonalState>;
+  listMissions(): Promise<Mission[]>;
   getTaskState(): TaskState | undefined;
   getSkills(): { skills: SkillSummary[]; diagnostics: string[]; loaded: string[] };
   getSessionState(): RuntimeSessionState;
@@ -83,12 +89,15 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
   const scheduler = options.computer ? await createDurableScheduler(options.computer) : undefined;
   const memoryStore = options.memoryStore ?? createFileMemoryStore();
   const personalStateStore = options.personalStateStore ?? createFilePersonalStateStore();
+  const missionStore = options.missionStore ?? createFileMissionStore();
+  const artifactStore = options.artifactStore ?? createFileArtifactStore();
   let memory = await memoryStore.render();
   const refreshMemory = async () => { memory = await memoryStore.render(); };
   const toolRegistry = createToolRegistry([
     ...localAgentTools,
     ...createMemoryTools(memoryStore, refreshMemory),
     ...createPersonalStateTools(personalStateStore),
+    ...createAutonomyTools(missionStore, artifactStore, provider),
     ...(options.computer ? [...createComputerTools(options.computer), ...createJobTools(options.computer)] : []),
     ...(scheduler ? createSchedulerTools(scheduler) : []),
     ...adaptToolDefinitions(skills.tools, (toolCall, context) => skills.callTool(toolCall, context.signal), 'sequential'),
@@ -169,10 +178,12 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
         const computerContext = options.computer
           ? `Current computer: ${options.computer.ref.backend} backend, workspace ${options.computer.ref.workspaceId}. Use computer_* tools for direct computer operations, job_* tools for durable background work, and schedule_* tools for future one-shot jobs. E2B is a computer backend, not a skill.`
           : '';
-        const [relevantMemory, personalState] = await Promise.all([
+        const [relevantMemory, personalState, missions] = await Promise.all([
           memoryStore.search(value, { limit: 12, maxChars: 4000 }),
           personalStateStore.get(),
+          missionStore.list(),
         ]);
+        const activeMission = missions.find((mission) => mission.status !== 'completed');
         const context = buildContext(
           formatMemoryEntries(relevantMemory),
           messages,
@@ -181,6 +192,7 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
           computerContext,
           {},
           formatPersonalState(personalState),
+          formatMission(activeMission),
         );
         const routed = await route?.(context, tools, signal);
         if (routed) {
@@ -466,6 +478,10 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
 
     getPersonalState() {
       return personalStateStore.get();
+    },
+
+    listMissions() {
+      return missionStore.list();
     },
 
     getTaskState() {
