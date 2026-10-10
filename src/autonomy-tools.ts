@@ -211,10 +211,6 @@ export function createAutonomyTools(
           ], undefined, context.signal);
 
           if (!result.text) throw new Error(`Subagent returned no text for task: ${task.id}`);
-          await missions.updateTask(parsed.missionId, task.id, {
-            status: 'completed',
-            result: result.text,
-          });
           return {
             taskId: task.id,
             text: result.text,
@@ -222,6 +218,15 @@ export function createAutonomyTools(
             usage: result.usage,
           };
         }));
+
+        // Subagents execute in parallel, but durable mission writes are committed
+        // sequentially to avoid lost updates on the shared mission document.
+        for (const result of results) {
+          await missions.updateTask(parsed.missionId, result.taskId, {
+            status: 'completed',
+            result: result.text,
+          });
+        }
 
         return results;
       },
