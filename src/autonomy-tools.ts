@@ -99,7 +99,13 @@ export function createAutonomyTools(
       idempotency: 'non-idempotent',
       execute(toolCall) {
         const parsed = createSchema.parse(toolCall.arguments);
-        return missions.create(parsed.goal, parsed.tasks);
+        return missions.create(
+          parsed.goal,
+          parsed.tasks.map((task) => ({
+            title: task.title,
+            ...(task.dependsOn === undefined ? {} : { dependsOn: task.dependsOn }),
+          })),
+        );
       },
     },
     {
