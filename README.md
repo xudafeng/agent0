@@ -215,3 +215,34 @@ Agent tools can read and update personal state, while desktop-initiated mutation
 
 Daily journal entries are appended as readable Markdown and remain separate from the machine-oriented current state.
 
+## Autonomous runtime
+
+Agent0 can persist long-horizon missions separately from short per-conversation task plans.
+
+A mission contains:
+
+- a goal
+- a dependency graph of durable tasks
+- task results
+- attached artifacts
+- an optional human handoff
+- an evaluator score and summary
+
+Mission state is stored under `data/autonomy`; generated artifacts live under `data/artifacts`.
+
+### Parallel delegation
+
+`autonomy_delegate_parallel` can execute up to four dependency-ready mission tasks in isolated subagents concurrently. Subagent inference runs in parallel, while durable mission updates are committed sequentially to prevent lost writes.
+
+### Human handoff
+
+When the agent cannot safely or correctly continue without user judgment, `autonomy_request_handoff` explicitly blocks the mission. The desktop Mission panel surfaces the question and lets the user respond before work resumes.
+
+### Evaluation
+
+`autonomy_evaluate` uses an isolated evaluator turn with explicit criteria and persists a 0–1 score plus summary on the mission.
+
+### Artifacts
+
+Agents can create durable Markdown, text, or JSON artifacts, attach them to a mission, and reopen them from the desktop Mission panel.
+
