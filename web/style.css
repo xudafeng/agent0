@@ -1557,3 +1557,132 @@ dialog select {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* Autonomous missions */
+
+.autonomy-goal {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.55;
+  color: #405149;
+  margin-bottom: 5px;
+}
+
+.autonomy-progress {
+  font-size: 9px;
+  color: #8a958e;
+  margin-bottom: 8px;
+}
+
+.autonomy-task {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 5px 0;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.autonomy-task-status {
+  flex-shrink: 0;
+  color: #6b8e78;
+}
+
+.autonomy-task-status.blocked {
+  color: #a56552;
+}
+
+.autonomy-task-status.completed {
+  color: #5f9272;
+}
+
+.autonomy-task-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.autonomy-evaluation {
+  margin-top: 10px;
+  padding: 8px 9px;
+  border-radius: 7px;
+  background: #eef4f0;
+  color: #4e6959;
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.autonomy-handoff {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid #efd9cf;
+  border-radius: 8px;
+  background: #fff8f4;
+}
+
+.autonomy-handoff strong {
+  font-size: 10px;
+  color: #8d5c4d;
+}
+
+.autonomy-handoff p {
+  margin: 6px 0 8px;
+  color: #725f56;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.autonomy-handoff textarea {
+  width: 100%;
+  resize: vertical;
+  padding: 8px;
+  border: 1px solid #e4d2c8;
+  border-radius: 6px;
+  background: white;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.autonomy-handoff button {
+  width: 100%;
+  margin-top: 7px;
+  padding: 8px;
+  font-size: 10px;
+}
+
+#autonomy-artifacts {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+}
+
+.autonomy-artifact {
+  padding: 5px 0;
+  text-align: left;
+  color: #4d705d;
+  font-size: 9px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.autonomy-artifact:hover {
+  text-decoration: underline;
+}
+
+#artifact-dialog {
+  width: min(760px, 92vw);
+}
+
+.artifact-content {
+  min-height: 180px;
+  max-height: 60vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 14px;
+  border-radius: 8px;
+  background: #f3f5f4;
+  font-size: 11px;
+  line-height: 1.7;
+}
