@@ -2,6 +2,14 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('agent0', {
   state: () => ipcRenderer.invoke('agent:state'),
+  personalState: () => ipcRenderer.invoke('agent:personal-state'),
+  personalSetFocus: (focus) => ipcRenderer.invoke('agent:personal-set-focus', focus),
+  personalAddGoal: (title) => ipcRenderer.invoke('agent:personal-add-goal', title),
+  personalRemoveGoal: (id) => ipcRenderer.invoke('agent:personal-remove-goal', id),
+  personalAddTask: (title, goalId) => ipcRenderer.invoke('agent:personal-add-task', { title, goalId }),
+  personalUpdateTask: (input) => ipcRenderer.invoke('agent:personal-update-task', input),
+  personalAddNote: (content) => ipcRenderer.invoke('agent:personal-add-note', content),
+  personalJournal: (content) => ipcRenderer.invoke('agent:personal-journal', content),
   backgroundState: () => ipcRenderer.invoke('agent:background-state'),
   cancelSchedule: (scheduleId) => ipcRenderer.invoke('agent:background-cancel-schedule', scheduleId),
   jobOutput: (jobId) => ipcRenderer.invoke('agent:background-job-output', jobId),

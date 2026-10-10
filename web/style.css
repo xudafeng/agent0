@@ -1410,3 +1410,150 @@ dialog select {
   width: 160px;
   margin: 0 0 10px;
 }
+
+
+/* Personal agent state */
+
+.personal-focus {
+  margin-bottom: 10px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: #44564c;
+}
+
+.personal-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 6px 0;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.personal-goal-row {
+  color: #69776f;
+}
+
+.personal-status {
+  flex-shrink: 0;
+  color: #5e8b72;
+}
+
+.personal-row-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+#personal-dialog {
+  width: min(760px, 92vw);
+  max-height: 88vh;
+  overflow: auto;
+}
+
+#personal-dialog textarea {
+  display: block;
+  width: 100%;
+  resize: vertical;
+  padding: 10px;
+  border: 1px solid #dbe2dc;
+  border-radius: 7px;
+  margin-top: 7px;
+  background: #fafcfb;
+  font-size: 12px;
+}
+
+#personal-focus-save {
+  margin-bottom: 18px;
+}
+
+.personal-dialog-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr;
+  gap: 22px;
+  margin-top: 12px;
+}
+
+.personal-dialog-grid section {
+  padding: 0;
+  border: 0;
+}
+
+.personal-dialog-grid h3 {
+  margin: 0 0 10px;
+  font-size: 13px;
+}
+
+#personal-goal-form,
+#personal-task-form {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 12px;
+}
+
+#personal-goal-form {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+#personal-task-form {
+  grid-template-columns: minmax(0, 1fr) 120px auto;
+}
+
+#personal-goal-form input,
+#personal-task-form input,
+#personal-task-form select {
+  margin: 0;
+  padding: 8px;
+  border: 1px solid #dbe2dc;
+  border-radius: 7px;
+  background: #fafcfb;
+  font-size: 11px;
+}
+
+.personal-manager-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 6px 0;
+  border-top: 1px solid #edf0ed;
+}
+
+.personal-manager-title {
+  min-width: 0;
+  flex: 1;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.personal-manager-title.completed {
+  color: #9ba39e;
+  text-decoration: line-through;
+}
+
+.personal-task-toggle,
+.personal-remove {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
+  color: #668370;
+}
+
+.personal-task-toggle:hover,
+.personal-remove:hover {
+  background: #eef2ef;
+}
+
+.personal-remove {
+  color: #9a5446;
+}
+
+@media (max-width: 700px) {
+  .personal-dialog-grid {
+    grid-template-columns: 1fr;
+  }
+
+  #personal-task-form {
+    grid-template-columns: 1fr;
+  }
+}

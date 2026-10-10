@@ -15,6 +15,7 @@ import { createFileWorkspaceStore } from '../dist/workspace.js';
 import { configuredComputerBackend, openSessionComputer } from '../dist/session-computer.js';
 import { createDurableScheduler } from '../dist/scheduler.js';
 import { listDurableJobs, readDurableJobOutput } from '../dist/job.js';
+import { createFilePersonalStateStore } from '../dist/personal-state.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const icon = path.join(root, 'desktop/assets/icon.png');
@@ -29,6 +30,7 @@ let events = [];
 let configPath;
 let savedMemory = '';
 let memoryStore;
+let personalStateStore;
 let sessionStore;
 let workspaceStore;
 let computerBackend;
@@ -150,12 +152,13 @@ async function getRuntime() {
     runtime = await createAgentRuntime({
       ...(activeComputer ? { computer: activeComputer } : {}),
       memoryStore,
+      personalStateStore,
       toolPolicy: (toolCall) => {
         if (toolCall.name.startsWith('mcp_')) {
           return { action: 'ask', reason: 'MCP tool requires approval before execution.' };
         }
-        if (toolCall.name === 'computer_exec' || toolCall.name === 'computer_write_file' || toolCall.name === 'computer_start_process' || toolCall.name === 'job_start' || toolCall.name === 'schedule_create' || toolCall.name === 'schedule_create_cron' || toolCall.name === 'schedule_cancel' || toolCall.name === 'memory_remember' || toolCall.name === 'memory_update' || toolCall.name === 'memory_forget') {
-          return { action: 'ask', reason: toolCall.name.startsWith('memory_') ? 'Persistent memory changes require approval before execution.' : 'Computer command, file change, background job, or schedule change requires approval before execution.' };
+        if (toolCall.name === 'computer_exec' || toolCall.name === 'computer_write_file' || toolCall.name === 'computer_start_process' || toolCall.name === 'job_start' || toolCall.name === 'schedule_create' || toolCall.name === 'schedule_create_cron' || toolCall.name === 'schedule_cancel' || toolCall.name === 'memory_remember' || toolCall.name === 'memory_update' || toolCall.name === 'memory_forget' || (toolCall.name.startsWith('personal_') && toolCall.name !== 'personal_state')) {
+          return { action: 'ask', reason: toolCall.name.startsWith('memory_') ? 'Persistent memory changes require approval before execution.' : toolCall.name.startsWith('personal_') ? 'Personal agent state changes require approval before execution.' : 'Computer command, file change, background job, or schedule change requires approval before execution.' };
         }
         return { action: 'allow' };
       },
@@ -231,7 +234,7 @@ function text(value, name, limit = 32000) {
 function handle(name, action) {
   ipcMain.handle(`agent:${name}`, async (event, payload) => {
     if (event.sender !== window?.webContents || event.senderFrame !== window.webContents.mainFrame) throw new Error('Unknown sender.');
-    if (name === 'state' || name === 'mcp-list' || name === 'background-state' || name === 'background-job-output' || name === 'memory-list' || name === 'memory-search') return action(payload);
+    if (name === 'state' || name === 'mcp-list' || name === 'background-state' || name === 'background-job-output' || name === 'memory-list' || name === 'memory-search' || name === 'personal-state') return action(payload);
     if (busy) throw new Error('Wait for the current operation to finish.');
     busy = true;
     publish('state', state());
@@ -365,6 +368,43 @@ handle('session-delete', async (id) => {
   pendingSessionState = snapshot ? structuredClone(snapshot.runtime) : undefined;
   events = [];
 });
+handle('personal-state', () => personalStateStore.get());
+handle('personal-set-focus', async (focus) => {
+  if (typeof focus !== 'string') throw new Error('Invalid daily focus.');
+  return personalStateStore.setDailyFocus(focus);
+});
+handle('personal-add-goal', async (title) => {
+  if (typeof title !== 'string') throw new Error('Invalid goal.');
+  return personalStateStore.addGoal(title);
+});
+handle('personal-remove-goal', async (id) => {
+  if (typeof id !== 'string') throw new Error('Invalid goal ID.');
+  await personalStateStore.removeGoal(id);
+});
+handle('personal-add-task', async (input) => {
+  if (!input || typeof input.title !== 'string' ||
+      (input.goalId !== undefined && typeof input.goalId !== 'string')) {
+    throw new Error('Invalid personal task.');
+  }
+  return personalStateStore.addTask(input.title, input.goalId);
+});
+handle('personal-update-task', async (input) => {
+  if (!input || typeof input.id !== 'string') throw new Error('Invalid personal task.');
+  return personalStateStore.updateTask(input.id, {
+    ...(typeof input.title === 'string' ? { title: input.title } : {}),
+    ...(typeof input.status === 'string' ? { status: input.status } : {}),
+    ...(input.goalId === null || typeof input.goalId === 'string' ? { goalId: input.goalId } : {}),
+  });
+});
+handle('personal-add-note', async (content) => {
+  if (typeof content !== 'string') throw new Error('Invalid personal note.');
+  return personalStateStore.addNote(content);
+});
+handle('personal-journal', async (content) => {
+  if (typeof content !== 'string') throw new Error('Invalid journal entry.');
+  return personalStateStore.appendDailyJournal(content);
+});
+
 handle('memory-list', async (scope) => {
   if (scope !== undefined && typeof scope !== 'string') throw new Error('Invalid memory scope.');
   return memoryStore.list(scope);
@@ -534,6 +574,7 @@ app.whenReady().then(async () => {
   configPath = path.join(dataDirectory, '.env');
   dotenv.config({ path: configPath, override: true, quiet: true });
   memoryStore = createFileMemoryStore();
+  personalStateStore = createFilePersonalStateStore();
   savedMemory = await memoryStore.render();
   sessionStore = createFileSessionStore();
   workspaceStore = createFileWorkspaceStore();

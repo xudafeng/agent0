@@ -1,126 +1,407 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
-  <title>agent0</title>
-  <link rel="stylesheet" href="style.css">
-</head>
-<body>
-  <aside class="sidebar">
-    <div class="brand"><span class="brand-mark">a<span>0</span></span><strong>agent0</strong><span class="version" data-i18n="DESKTOP">DESKTOP</span></div>
-    <button id="new-chat" class="new-chat"><span>＋</span> <span data-i18n="New conversation">New conversation</span> <kbd>⌘ N</kbd></button>
-    <div class="section-label" data-i18n="CONVERSATIONS">CONVERSATIONS</div>
-    <div id="session-list" class="session-list" aria-label="Conversations" data-i18n-aria-label="Conversations"></div>
-    <div class="session-note"><span data-i18n="Your space to think,">Your space to think,</span><br><span data-i18n="plan, and get things done.">plan, and get things done.</span></div>
-    <div class="sidebar-bottom"><label class="language-control"><span data-i18n="Language">Language</span><select data-language aria-label="Language" data-i18n-aria-label="Language"><option value="en">English</option><option value="zh">简体中文</option></select></label><div class="local-label"><span class="dot"></span> <span data-i18n="Runs on your computer">Runs on your computer</span></div><button id="jev-button" class="settings-button"><span>◈</span><span data-i18n="Jev routing">Jev routing</span><span id="jev-status"></span></button><button id="skills-button" class="settings-button"><span>✳</span><span data-i18n="Skills">Skills</span><span>↗</span></button><button id="mcp-button" class="settings-button"><span>◇</span><span data-i18n="MCP servers">MCP servers</span><span>↗</span></button><button id="settings-button" class="settings-button">⚙ <span data-i18n="Model settings">Model settings</span><span>↗</span></button></div>
-  </aside>
-  <main>
-    <header><div><span class="breadcrumb" data-i18n="Workspace /">Workspace /</span> <span id="active-session-title" data-i18n="Conversation">Conversation</span></div><div class="connection"><span class="dot" id="status-dot"></span><span id="connection-label" data-i18n="Ready">Ready</span></div></header>
-    <div id="messages" class="messages" aria-live="polite">
-      <section id="welcome" class="welcome"><div class="hero-mark">a<span>0</span></div><div class="eyebrow" data-i18n="A LITTLE HELP. A LOT OF POSSIBILITY.">A LITTLE HELP. A LOT OF POSSIBILITY.</div><h1 data-i18n="What are we working on?">What are we working on?</h1><p><span data-i18n="Bring an idea, a question, or a task.">Bring an idea, a question, or a task.</span><br><span data-i18n="Your agent will take it from here.">Your agent will take it from here.</span></p><div class="jev-feature">
-        <div class="jev-feature-heading"><span class="jev-feature-badge">Jev</span><span class="jev-feature-kicker" data-i18n="SMART TOOL ROUTING">SMART TOOL ROUTING</span></div>
-        <strong data-i18n="Jev selects the tool. Your model takes it from there.">Jev selects the tool. Your model takes it from there.</strong>
-        <p data-i18n="Confidence-aware decisions, with your main model ready to take over.">Confidence-aware decisions, with your main model ready to take over.</p>
-        <button id="jev-welcome-button" type="button"><span id="jev-welcome-label" data-i18n="Set up Jev">Set up Jev</span><span aria-hidden="true">↗</span></button>
-      </div><div class="suggestions"><button data-prompt="Help me plan my day. Ask me about my priorities first." data-i18n-data-prompt="Help me plan my day. Ask me about my priorities first."><span>↗</span><strong data-i18n="Make a plan">Make a plan</strong><small data-i18n="Turn a goal into clear next steps">Turn a goal into clear next steps</small></button><button data-prompt="What tools can you use? Give me a short overview and a simple example." data-i18n-data-prompt="What tools can you use? Give me a short overview and a simple example."><span>✳</span><strong data-i18n="Explore your tools">Explore your tools</strong><small data-i18n="See what your agent can do">See what your agent can do</small></button><button data-prompt="Help me break down a complex problem. Ask me what I am trying to solve." data-i18n-data-prompt="Help me break down a complex problem. Ask me what I am trying to solve."><span>◇</span><strong data-i18n="Think it through">Think it through</strong><small data-i18n="Find a fresh perspective">Find a fresh perspective</small></button></div></section>
-      <div id="conversation"></div>
-    </div>
-    <div class="composer-area"><div id="error" class="error-banner" role="alert" hidden></div><div id="progress" class="progress" hidden><span class="spinner"></span><span id="progress-label" data-i18n="Thinking…">Thinking…</span></div><form id="chat-form" class="composer"><textarea id="prompt" rows="2" maxlength="32000" placeholder="Ask anything, or describe a task…" data-i18n-placeholder="Ask anything, or describe a task…" aria-label="Message" data-i18n-aria-label="Message"></textarea><div class="composer-bottom"><span id="model-label" data-i18n="Configure your model">Configure your model</span><div class="composer-actions"><button id="stop" type="button" title="Stop run" data-i18n-title="Stop run" aria-label="Stop run" data-i18n-aria-label="Stop run" hidden>■</button><button id="send" type="submit" title="Send message" data-i18n-title="Send message" aria-label="Send message" data-i18n-aria-label="Send message">↑</button></div></div></form><div class="composer-hint"><span data-i18n="Enter to send · Shift + Enter for a new line">Enter to send · Shift + Enter for a new line</span> <span data-i18n="Powered by your model. Guided by you.">Powered by your model. Guided by you.</span></div></div>
-  </main>
-  <aside class="inspector"><div class="inspector-title"><span data-i18n="Agent workspace">Agent workspace</span> <span>◌</span></div><section><div class="panel-heading"><h2 data-i18n="Task plan">Task plan</h2><span>01</span></div><div id="task" class="empty-panel"><span data-i18n="A little structure goes a long way.">A little structure goes a long way.</span><br><span data-i18n="Your task plan will appear here.">Your task plan will appear here.</span></div></section><section><div class="panel-heading"><h2 data-i18n="Activity">Activity</h2><span id="activity-count">0</span></div><div id="activity" class="activity empty-panel"><span data-i18n="Tool calls and progress,">Tool calls and progress,</span><br><span data-i18n="as they happen.">as they happen.</span></div></section><section class="background-section"><div class="panel-heading"><h2>Background</h2><button id="background-refresh" type="button" class="panel-action" title="Refresh background state" aria-label="Refresh background state">↻</button></div><div id="background-next" class="background-next empty-panel">No background schedules.</div><div id="background-schedules"></div><div id="background-jobs"></div></section><section class="memory-section"><div class="panel-heading"><h2 data-i18n="Memory">Memory</h2><button id="memory-manage" type="button" class="panel-action" data-i18n-title="Manage memory" title="Manage memory">↗</button></div><div id="memory" class="memory empty-panel" data-i18n="Save useful context for future conversations.">Save useful context for future conversations.</div><form id="memory-form"><select id="memory-scope" aria-label="Memory scope" data-i18n-aria-label="Memory scope"><option value="general" data-i18n="General">General</option><option value="profile" data-i18n="Profile">Profile</option><option value="preferences" data-i18n="Preferences">Preferences</option><option value="projects" data-i18n="Projects">Projects</option><option value="working" data-i18n="Working memory">Working</option></select><input id="memory-input" placeholder="Something to remember…" data-i18n-placeholder="Something to remember…" maxlength="4000" aria-label="Memory to save" data-i18n-aria-label="Memory to save"><button type="submit" title="Save memory" data-i18n-title="Save memory" aria-label="Save memory" data-i18n-aria-label="Save memory">＋</button></form><small class="muted" data-i18n="Stored locally across conversations.">Stored locally across conversations.</small></section><div class="inspector-footer" data-i18n="LESS FRICTION. MORE DOING.">LESS FRICTION. MORE DOING.</div></aside>
-  <dialog id="memory-dialog" aria-labelledby="memory-dialog-title">
-    <div class="dialog-heading"><div><div class="eyebrow" data-i18n="PERSISTENT MEMORY">PERSISTENT MEMORY</div><h2 id="memory-dialog-title" data-i18n="Manage memory">Manage memory</h2></div><button type="button" id="close-memory-dialog" aria-label="Close">×</button></div>
-    <p data-i18n="Memory is stored as readable Markdown files on this computer.">Memory is stored as readable Markdown files on this computer.</p>
-    <div class="memory-dialog-toolbar"><input id="memory-search" placeholder="Search memory…" data-i18n-placeholder="Search memory…" aria-label="Search memory" data-i18n-aria-label="Search memory"><select id="memory-filter" aria-label="Memory scope" data-i18n-aria-label="Memory scope"><option value="" data-i18n="All scopes">All scopes</option><option value="profile" data-i18n="Profile">Profile</option><option value="preferences" data-i18n="Preferences">Preferences</option><option value="projects" data-i18n="Projects">Projects</option><option value="working" data-i18n="Working memory">Working</option><option value="general" data-i18n="General">General</option></select></div>
-    <div id="memory-list" class="memory-list" aria-live="polite"></div>
-  </dialog>
-  <dialog id="background-job-dialog" aria-labelledby="background-job-title">
-    <div class="dialog-heading"><div><div class="eyebrow">BACKGROUND JOB</div><h2 id="background-job-title">Job output</h2></div><button type="button" id="close-background-job" aria-label="Close">×</button></div>
-    <div id="background-job-meta" class="muted"></div>
-    <h3>stdout</h3><pre id="background-job-stdout" class="background-output"></pre>
-    <h3>stderr</h3><pre id="background-job-stderr" class="background-output"></pre>
-  </dialog>
-  <dialog id="settings"><form id="settings-form"><div class="dialog-heading"><div><div class="eyebrow" data-i18n="MAKE IT YOURS">MAKE IT YOURS</div><h2 data-i18n="Connect your model">Connect your model</h2></div><button type="button" id="close-settings" aria-label="Close settings" data-i18n-aria-label="Close settings">×</button></div><p data-i18n="Use your own API key to get started. Settings are saved on this computer.">Use your own API key to get started. Settings are saved on this computer.</p><label class="language-control"><span data-i18n="Language">Language</span><select data-language aria-label="Language" data-i18n-aria-label="Language"><option value="en">English</option><option value="zh">简体中文</option></select></label><label><span data-i18n="Provider">Provider</span><select id="provider"><option value="kimi">Kimi / Moonshot</option><option value="openai">OpenAI</option></select></label><label><span data-i18n="Model">Model</span><input id="model" required placeholder="Model ID from your provider" data-i18n-placeholder="Model ID from your provider"></label><label id="base-url-field"><span data-i18n="Base URL">Base URL</span><input id="base-url" type="url" value="https://api.moonshot.cn/v1"></label><label><span data-i18n="API key">API key</span><input id="api-key" type="password" autocomplete="off" placeholder="Enter your API key" data-i18n-placeholder="Enter your API key"></label><small class="muted" data-i18n="Keys are stored in a local .env file and sent only to your selected provider. Saving starts a new conversation.">Keys are stored in a local .env file and sent only to your selected provider. Saving starts a new conversation.</small><div id="settings-error" class="error-banner" role="alert" hidden></div><button class="primary" type="submit" id="save-settings" data-i18n="Save settings">Save settings</button></form></dialog>
-  <dialog id="tool-approval" aria-labelledby="tool-approval-title">
-    <div class="dialog-heading"><div><div class="eyebrow" data-i18n="TOOL APPROVAL">TOOL APPROVAL</div><h2 id="tool-approval-title" data-i18n="Allow this tool?">Allow this tool?</h2></div></div>
-    <p id="tool-approval-reason"></p>
-    <code id="tool-approval-name"></code>
-    <pre id="tool-approval-arguments"></pre>
-    <div class="dialog-actions"><button id="tool-deny" type="button" data-i18n="Deny">Deny</button><button id="tool-approve" type="button" class="primary" data-i18n="Allow once">Allow once</button></div>
-  </dialog>
-  <dialog id="skills-dialog" aria-labelledby="skills-title">
-    <div class="dialog-heading"><h2 id="skills-title" data-i18n="Skills">Skills</h2><button type="button" id="close-skills" aria-label="Close settings" data-i18n-aria-label="Close settings">×</button></div>
-    <p data-i18n="Choose a skill to add it to your message. Describe the task before sending.">Choose a skill to add it to your message. Describe the task before sending.</p>
-    <p class="muted" data-i18n="Skills are discovered when a conversation starts. Start a new conversation to pick up file changes.">Skills are discovered when a conversation starts. Start a new conversation to pick up file changes.</p>
-    <details><summary data-i18n="Skill directories">Skill directories</summary><pre id="skills-directories"></pre></details>
-    <button id="skills-refresh" type="button" class="secondary" data-i18n="Refresh status">Refresh status</button>
-    <div id="skills-error" class="error-banner" role="alert" hidden></div>
-    <div id="skills-list" aria-live="polite"></div>
-    <details id="skills-diagnostics" hidden><summary data-i18n="Discovery errors">Discovery errors</summary><pre id="skills-diagnostics-text"></pre></details>
-  </dialog>
-  <dialog id="jev-settings">
-    <form id="jev-form">
-      <div class="dialog-heading"><h2 data-i18n="Jev routing">Jev routing</h2><button type="button" id="close-jev" aria-label="Close settings" data-i18n-aria-label="Close settings">×</button></div>
-      <p data-i18n="Let Jev select relevant tools while your main model handles reasoning and replies.">Let Jev select relevant tools while your main model handles reasoning and replies.</p>
-      <label class="mcp-enabled"><input id="jev-enabled" type="checkbox"><span data-i18n="Enable Jev routing">Enable Jev routing</span></label>
-      <label><span data-i18n="TypeSafe API key">TypeSafe API key</span><input id="jev-key" type="password" autocomplete="off"></label>
-      <label><span data-i18n="Model">Model</span><input id="jev-model" required maxlength="200" value="jev-latest"></label>
-      <label><span data-i18n="Minimum confidence">Minimum confidence</span><input id="jev-confidence" type="number" min="0" max="1" step="0.01" value="0.8" required></label>
-      <p data-i18n="When Jev is uncertain or unavailable, the main model chooses from all tools.">When Jev is uncertain or unavailable, the main model chooses from all tools.</p>
-      <small class="muted" data-i18n="When enabled, conversation context, memory, and tool descriptions are sent to TypeSafe. Your key is stored locally. Saving starts a new conversation.">When enabled, conversation context, memory, and tool descriptions are sent to TypeSafe. Your key is stored locally. Saving starts a new conversation.</small>
-      <div id="jev-error" class="error-banner" role="alert" hidden></div>
-      <button id="jev-save" class="primary" type="submit" data-i18n="Save settings">Save settings</button>
-    </form>
-  </dialog>
-  <dialog id="reset-dialog"><h2 data-i18n="Start a new conversation?">Start a new conversation?</h2><p data-i18n="This clears the current chat and task plan. Your saved memory stays.">This clears the current chat and task plan. Your saved memory stays.</p><div class="dialog-actions"><button id="cancel-reset" data-i18n="Keep chatting">Keep chatting</button><button id="confirm-reset" class="primary" data-i18n="New conversation">New conversation</button></div></dialog>
-  <dialog id="mcp-settings">
-    <div class="dialog-heading">
-      <h2 data-i18n="MCP servers">MCP servers</h2>
-      <button type="button" id="close-mcp" aria-label="Close settings" data-i18n-aria-label="Close settings">×</button>
-    </div>
-    <p data-i18n="Connect local or remote MCP services. Enabled services connect when a conversation needs them.">Connect local or remote MCP services. Enabled services connect when a conversation needs them.</p>
-    <p class="mcp-notice" data-i18n="Saving, enabling, or removing a server starts a new conversation. Your memory stays.">Saving, enabling, or removing a server starts a new conversation. Your memory stays.</p>
-    <div id="mcp-error" class="error-banner" role="alert" hidden></div>
-    <div class="mcp-layout">
-      <div class="mcp-sidebar">
-        <button type="button" id="mcp-filesystem" class="secondary" data-i18n="Built-in Filesystem">Built-in Filesystem</button>
-        <button type="button" id="mcp-add" class="secondary" data-i18n="Add server">Add server</button>
-        <button type="button" id="mcp-refresh" class="secondary" data-i18n="Refresh status">Refresh status</button>
-        <p class="muted" data-i18n="Status is based on the last connection check.">Status is based on the last connection check.</p>
-        <div id="mcp-list"></div>
-        <small class="muted" data-i18n="The built-in demo server is always available.">The built-in demo server is always available.</small>
+  <head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"><title>agent0</title><link rel="stylesheet" href="style.css">
+  </head>
+  <body>
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">a<span>0</span></span><strong>agent0</strong><span class="version" data-i18n="DESKTOP">DESKTOP</span>
       </div>
-      <form id="mcp-form">
-        <section id="mcp-filesystem-fields" hidden>
-          <h3 data-i18n="Filesystem">Filesystem</h3>
-          <p data-i18n="Read, write, and organize files in your chosen folder. Bundled with agent0; no installation needed.">Read, write, and organize files in your chosen folder. Bundled with agent0; no installation needed.</p>
-          <label><span data-i18n="Allowed folder">Allowed folder</span><input id="mcp-directory" readonly placeholder="Choose a folder to get started" data-i18n-placeholder="Choose a folder to get started"></label>
-          <button type="button" id="mcp-pick-directory" class="secondary" data-i18n="Choose folder">Choose folder</button>
-          <p data-i18n="Only this folder and its subfolders are accessible. Save to enable access.">Only this folder and its subfolders are accessible. Save to enable access.</p>
-        </section>
-        <label data-mcp-external><span data-i18n="Connection type">Connection type</span><select id="mcp-transport"><option value="stdio" data-i18n="Local command (stdio)">Local command (stdio)</option><option value="http" data-i18n="Remote HTTP (Streamable HTTP)">Remote HTTP (Streamable HTTP)</option><option value="sse" data-i18n="Remote SSE (legacy)">Remote SSE (legacy)</option></select></label>
-        <label data-mcp-external><span data-i18n="Server ID">Server ID</span><input id="mcp-id" required pattern="[a-z][a-z0-9_\-]{0,23}" maxlength="24" placeholder="my-server"><small class="muted" data-i18n="Use lowercase letters, digits, hyphens, or underscores; start with a letter.">Use lowercase letters, digits, hyphens, or underscores; start with a letter.</small></label>
-        <label data-mcp-stdio><span data-i18n="Command">Command</span><input id="mcp-command" required placeholder="/absolute/path/to/pnpm"><small class="muted" data-i18n="Use an absolute executable path if the app cannot find your command.">Use an absolute executable path if the app cannot find your command.</small></label>
-        <label data-mcp-stdio><span data-i18n="Arguments (JSON array)">Arguments (JSON array)</span><textarea id="mcp-args" rows="2" spellcheck="false">[]</textarea></label>
-        <label data-mcp-stdio><span data-i18n="Environment variables (JSON object)">Environment variables (JSON object)</span><textarea id="mcp-env" rows="2" spellcheck="false">{}</textarea></label>
-        <label data-mcp-stdio><span data-i18n="Working directory">Working directory</span><input id="mcp-cwd" placeholder="Optional absolute directory" data-i18n-placeholder="Optional absolute directory"></label>
-        <section id="mcp-remote-fields" hidden>
-          <label><span data-i18n="Server URL">Server URL</span><input id="mcp-url" type="url" placeholder="https://example.com/mcp"><small class="muted" data-i18n="Use the MCP endpoint URL provided by your service.">Use the MCP endpoint URL provided by your service.</small></label>
-          <label><span data-i18n="Request headers (JSON object)">Request headers (JSON object)</span><textarea id="mcp-headers" rows="3" spellcheck="false" placeholder='{"Authorization":"Bearer your-token"}'>{}</textarea></label>
-          <small class="muted" data-i18n="Optional: Authorization or API key headers. Browser OAuth sign-in is not supported yet.">Optional: Authorization or API key headers. Browser OAuth sign-in is not supported yet.</small>
-        </section>
-        <label class="mcp-enabled"><input id="mcp-enabled" type="checkbox" checked><span data-i18n="Enabled">Enabled</span></label>
-        <div class="mcp-actions">
-          <button type="button" id="mcp-test" class="secondary" data-i18n="Test connection">Test connection</button>
-          <button type="submit" id="mcp-save" class="primary" data-i18n="Save server">Save server</button>
+      <button id="new-chat" class="new-chat"><span>＋</span> <span data-i18n="New conversation">New conversation</span> <kbd>⌘ N</kbd></button>
+      <div class="section-label" data-i18n="CONVERSATIONS">
+        CONVERSATIONS
+      </div>
+      <div id="session-list" class="session-list" aria-label="Conversations" data-i18n-aria-label="Conversations">
+      </div>
+      <div class="session-note">
+        <span data-i18n="Your space to think,">Your space to think,</span><br><span data-i18n="plan, and get things done.">plan, and get things done.</span>
+      </div>
+      <div class="sidebar-bottom">
+        <label class="language-control"><span data-i18n="Language">Language</span><select data-language aria-label="Language" data-i18n-aria-label="Language"><option value="en">English</option><option value="zh">简体中文</option></select></label>
+        <div class="local-label">
+          <span class="dot"></span> <span data-i18n="Runs on your computer">Runs on your computer</span>
         </div>
-        <div id="mcp-result" role="status" aria-live="polite"></div>
-        <div id="mcp-tools"></div>
+        <button id="jev-button" class="settings-button"><span>◈</span><span data-i18n="Jev routing">Jev routing</span><span id="jev-status"></span></button><button id="skills-button" class="settings-button"><span>✳</span><span data-i18n="Skills">Skills</span><span>↗</span></button><button id="mcp-button" class="settings-button"><span>◇</span><span data-i18n="MCP servers">MCP servers</span><span>↗</span></button><button id="settings-button" class="settings-button">⚙ <span data-i18n="Model settings">Model settings</span><span>↗</span></button>
+      </div>
+    </aside>
+    <main>
+      <header>
+        <div>
+          <span class="breadcrumb" data-i18n="Workspace /">Workspace /</span> <span id="active-session-title" data-i18n="Conversation">Conversation</span>
+        </div>
+        <div class="connection">
+          <span class="dot" id="status-dot"></span><span id="connection-label" data-i18n="Ready">Ready</span>
+        </div>
+      </header>
+      <div id="messages" class="messages" aria-live="polite">
+        <section id="welcome" class="welcome">
+          <div class="hero-mark">
+            a<span>0</span>
+          </div>
+          <div class="eyebrow" data-i18n="A LITTLE HELP. A LOT OF POSSIBILITY.">
+            A LITTLE HELP. A LOT OF POSSIBILITY.
+          </div>
+          <h1 data-i18n="What are we working on?">
+            What are we working on?
+          </h1>
+          <p>
+            <span data-i18n="Bring an idea, a question, or a task.">Bring an idea, a question, or a task.</span><br><span data-i18n="Your agent will take it from here.">Your agent will take it from here.</span>
+          </p>
+          <div class="jev-feature">
+            <div class="jev-feature-heading">
+              <span class="jev-feature-badge">Jev</span><span class="jev-feature-kicker" data-i18n="SMART TOOL ROUTING">SMART TOOL ROUTING</span>
+            </div>
+            <strong data-i18n="Jev selects the tool. Your model takes it from there.">Jev selects the tool. Your model takes it from there.</strong>
+            <p data-i18n="Confidence-aware decisions, with your main model ready to take over.">
+              Confidence-aware decisions, with your main model ready to take over.
+            </p>
+            <button id="jev-welcome-button" type="button"><span id="jev-welcome-label" data-i18n="Set up Jev">Set up Jev</span><span aria-hidden="true">↗</span></button>
+          </div>
+          <div class="suggestions">
+            <button data-prompt="Help me plan my day. Ask me about my priorities first." data-i18n-data-prompt="Help me plan my day. Ask me about my priorities first."><span>↗</span><strong data-i18n="Make a plan">Make a plan</strong><small data-i18n="Turn a goal into clear next steps">Turn a goal into clear next steps</small></button><button data-prompt="What tools can you use? Give me a short overview and a simple example." data-i18n-data-prompt="What tools can you use? Give me a short overview and a simple example."><span>✳</span><strong data-i18n="Explore your tools">Explore your tools</strong><small data-i18n="See what your agent can do">See what your agent can do</small></button><button data-prompt="Help me break down a complex problem. Ask me what I am trying to solve." data-i18n-data-prompt="Help me break down a complex problem. Ask me what I am trying to solve."><span>◇</span><strong data-i18n="Think it through">Think it through</strong><small data-i18n="Find a fresh perspective">Find a fresh perspective</small></button>
+          </div>
+        </section>
+        <div id="conversation">
+        </div>
+      </div>
+      <div class="composer-area">
+        <div id="error" class="error-banner" role="alert" hidden>
+        </div>
+        <div id="progress" class="progress" hidden>
+          <span class="spinner"></span><span id="progress-label" data-i18n="Thinking…">Thinking…</span>
+        </div>
+        <form id="chat-form" class="composer">
+          <textarea id="prompt" rows="2" maxlength="32000" placeholder="Ask anything, or describe a task…" data-i18n-placeholder="Ask anything, or describe a task…" aria-label="Message" data-i18n-aria-label="Message"></textarea>
+          <div class="composer-bottom">
+            <span id="model-label" data-i18n="Configure your model">Configure your model</span>
+            <div class="composer-actions">
+              <button id="stop" type="button" title="Stop run" data-i18n-title="Stop run" aria-label="Stop run" data-i18n-aria-label="Stop run" hidden>■</button><button id="send" type="submit" title="Send message" data-i18n-title="Send message" aria-label="Send message" data-i18n-aria-label="Send message">↑</button>
+            </div>
+          </div>
+        </form>
+        <div class="composer-hint">
+          <span data-i18n="Enter to send · Shift + Enter for a new line">Enter to send · Shift + Enter for a new line</span> <span data-i18n="Powered by your model. Guided by you.">Powered by your model. Guided by you.</span>
+        </div>
+      </div>
+    </main>
+    <aside class="inspector">
+      <div class="inspector-title">
+        <span data-i18n="Agent workspace">Agent workspace</span> <span>◌</span>
+      </div>
+      <section class="personal-section">
+        <div class="panel-heading">
+          <h2>
+            Today
+          </h2>
+          <button id="personal-manage" type="button" class="panel-action" title="Manage personal state" aria-label="Manage personal state">↗</button>
+        </div>
+        <div id="personal-focus" class="personal-focus empty-panel">
+          No daily focus.
+        </div>
+        <div id="personal-tasks">
+        </div>
+        <div id="personal-goals">
+        </div>
+      </section>
+      <section>
+        <div class="panel-heading">
+          <h2 data-i18n="Task plan">
+            Task plan
+          </h2>
+          <span>01</span>
+        </div>
+        <div id="task" class="empty-panel">
+          <span data-i18n="A little structure goes a long way.">A little structure goes a long way.</span><br><span data-i18n="Your task plan will appear here.">Your task plan will appear here.</span>
+        </div>
+      </section>
+      <section>
+        <div class="panel-heading">
+          <h2 data-i18n="Activity">
+            Activity
+          </h2>
+          <span id="activity-count">0</span>
+        </div>
+        <div id="activity" class="activity empty-panel">
+          <span data-i18n="Tool calls and progress,">Tool calls and progress,</span><br><span data-i18n="as they happen.">as they happen.</span>
+        </div>
+      </section>
+      <section class="background-section">
+        <div class="panel-heading">
+          <h2>
+            Background
+          </h2>
+          <button id="background-refresh" type="button" class="panel-action" title="Refresh background state" aria-label="Refresh background state">↻</button>
+        </div>
+        <div id="background-next" class="background-next empty-panel">
+          No background schedules.
+        </div>
+        <div id="background-schedules">
+        </div>
+        <div id="background-jobs">
+        </div>
+      </section>
+      <section class="memory-section">
+        <div class="panel-heading">
+          <h2 data-i18n="Memory">
+            Memory
+          </h2>
+          <button id="memory-manage" type="button" class="panel-action" data-i18n-title="Manage memory" title="Manage memory">↗</button>
+        </div>
+        <div id="memory" class="memory empty-panel" data-i18n="Save useful context for future conversations.">
+          Save useful context for future conversations.
+        </div>
+        <form id="memory-form">
+          <select id="memory-scope" aria-label="Memory scope" data-i18n-aria-label="Memory scope"><option value="general" data-i18n="General">General</option><option value="profile" data-i18n="Profile">Profile</option><option value="preferences" data-i18n="Preferences">Preferences</option><option value="projects" data-i18n="Projects">Projects</option><option value="working" data-i18n="Working memory">Working</option></select><input id="memory-input" placeholder="Something to remember…" data-i18n-placeholder="Something to remember…" maxlength="4000" aria-label="Memory to save" data-i18n-aria-label="Memory to save"><button type="submit" title="Save memory" data-i18n-title="Save memory" aria-label="Save memory" data-i18n-aria-label="Save memory">＋</button>
+        </form>
+        <small class="muted" data-i18n="Stored locally across conversations.">Stored locally across conversations.</small>
+      </section>
+      <div class="inspector-footer" data-i18n="LESS FRICTION. MORE DOING.">
+        LESS FRICTION. MORE DOING.
+      </div>
+    </aside>
+    <dialog id="personal-dialog" aria-labelledby="personal-dialog-title">
+      <div class="dialog-heading">
+        <div>
+          <div class="eyebrow">
+            PERSONAL AGENT
+          </div>
+          <h2 id="personal-dialog-title">
+            Personal state
+          </h2>
+        </div>
+        <button type="button" id="close-personal-dialog" aria-label="Close">×</button>
+      </div>
+      <label>Daily focus<textarea id="personal-focus-input" rows="2" maxlength="1000"></textarea></label><button id="personal-focus-save" type="button" class="primary">Save focus</button>
+      <div class="personal-dialog-grid">
+        <section>
+          <h3>
+            Goals
+          </h3>
+          <form id="personal-goal-form">
+            <input id="personal-goal-input" maxlength="500" placeholder="Add a goal"><button type="submit" class="secondary">Add</button>
+          </form>
+          <div id="personal-goal-list">
+          </div>
+        </section>
+        <section>
+          <h3>
+            Tasks
+          </h3>
+          <form id="personal-task-form">
+            <input id="personal-task-input" maxlength="1000" placeholder="Add a task"><select id="personal-task-goal"><option value="">No goal</option></select><button type="submit" class="secondary">Add</button>
+          </form>
+          <div id="personal-task-list">
+          </div>
+        </section>
+      </div>
+    </dialog>
+    <dialog id="memory-dialog" aria-labelledby="memory-dialog-title">
+      <div class="dialog-heading">
+        <div>
+          <div class="eyebrow" data-i18n="PERSISTENT MEMORY">
+            PERSISTENT MEMORY
+          </div>
+          <h2 id="memory-dialog-title" data-i18n="Manage memory">
+            Manage memory
+          </h2>
+        </div>
+        <button type="button" id="close-memory-dialog" aria-label="Close">×</button>
+      </div>
+      <p data-i18n="Memory is stored as readable Markdown files on this computer.">
+        Memory is stored as readable Markdown files on this computer.
+      </p>
+      <div class="memory-dialog-toolbar">
+        <input id="memory-search" placeholder="Search memory…" data-i18n-placeholder="Search memory…" aria-label="Search memory" data-i18n-aria-label="Search memory"><select id="memory-filter" aria-label="Memory scope" data-i18n-aria-label="Memory scope"><option value="" data-i18n="All scopes">All scopes</option><option value="profile" data-i18n="Profile">Profile</option><option value="preferences" data-i18n="Preferences">Preferences</option><option value="projects" data-i18n="Projects">Projects</option><option value="working" data-i18n="Working memory">Working</option><option value="general" data-i18n="General">General</option></select>
+      </div>
+      <div id="memory-list" class="memory-list" aria-live="polite">
+      </div>
+    </dialog>
+    <dialog id="background-job-dialog" aria-labelledby="background-job-title">
+      <div class="dialog-heading">
+        <div>
+          <div class="eyebrow">
+            BACKGROUND JOB
+          </div>
+          <h2 id="background-job-title">
+            Job output
+          </h2>
+        </div>
+        <button type="button" id="close-background-job" aria-label="Close">×</button>
+      </div>
+      <div id="background-job-meta" class="muted">
+      </div>
+      <h3>
+        stdout
+      </h3>
+      <pre id="background-job-stdout" class="background-output">
+      </pre>
+      <h3>
+        stderr
+      </h3>
+      <pre id="background-job-stderr" class="background-output">
+      </pre>
+    </dialog>
+    <dialog id="settings">
+      <form id="settings-form">
+        <div class="dialog-heading">
+          <div>
+            <div class="eyebrow" data-i18n="MAKE IT YOURS">
+              MAKE IT YOURS
+            </div>
+            <h2 data-i18n="Connect your model">
+              Connect your model
+            </h2>
+          </div>
+          <button type="button" id="close-settings" aria-label="Close settings" data-i18n-aria-label="Close settings">×</button>
+        </div>
+        <p data-i18n="Use your own API key to get started. Settings are saved on this computer.">
+          Use your own API key to get started. Settings are saved on this computer.
+        </p>
+        <label class="language-control"><span data-i18n="Language">Language</span><select data-language aria-label="Language" data-i18n-aria-label="Language"><option value="en">English</option><option value="zh">简体中文</option></select></label><label><span data-i18n="Provider">Provider</span><select id="provider"><option value="kimi">Kimi / Moonshot</option><option value="openai">OpenAI</option></select></label><label><span data-i18n="Model">Model</span><input id="model" required placeholder="Model ID from your provider" data-i18n-placeholder="Model ID from your provider"></label><label id="base-url-field"><span data-i18n="Base URL">Base URL</span><input id="base-url" type="url" value="https://api.moonshot.cn/v1"></label><label><span data-i18n="API key">API key</span><input id="api-key" type="password" autocomplete="off" placeholder="Enter your API key" data-i18n-placeholder="Enter your API key"></label><small class="muted" data-i18n="Keys are stored in a local .env file and sent only to your selected provider. Saving starts a new conversation.">Keys are stored in a local .env file and sent only to your selected provider. Saving starts a new conversation.</small>
+        <div id="settings-error" class="error-banner" role="alert" hidden>
+        </div>
+        <button class="primary" type="submit" id="save-settings" data-i18n="Save settings">Save settings</button>
       </form>
-    </div>
-  </dialog>
-  <script type="module" src="app.js"></script>
-</body>
+    </dialog>
+    <dialog id="tool-approval" aria-labelledby="tool-approval-title">
+      <div class="dialog-heading">
+        <div>
+          <div class="eyebrow" data-i18n="TOOL APPROVAL">
+            TOOL APPROVAL
+          </div>
+          <h2 id="tool-approval-title" data-i18n="Allow this tool?">
+            Allow this tool?
+          </h2>
+        </div>
+      </div>
+      <p id="tool-approval-reason">
+      </p>
+      <code id="tool-approval-name"></code>
+      <pre id="tool-approval-arguments">
+      </pre>
+      <div class="dialog-actions">
+        <button id="tool-deny" type="button" data-i18n="Deny">Deny</button><button id="tool-approve" type="button" class="primary" data-i18n="Allow once">Allow once</button>
+      </div>
+    </dialog>
+    <dialog id="skills-dialog" aria-labelledby="skills-title">
+      <div class="dialog-heading">
+        <h2 id="skills-title" data-i18n="Skills">
+          Skills
+        </h2>
+        <button type="button" id="close-skills" aria-label="Close settings" data-i18n-aria-label="Close settings">×</button>
+      </div>
+      <p data-i18n="Choose a skill to add it to your message. Describe the task before sending.">
+        Choose a skill to add it to your message. Describe the task before sending.
+      </p>
+      <p class="muted" data-i18n="Skills are discovered when a conversation starts. Start a new conversation to pick up file changes.">
+        Skills are discovered when a conversation starts. Start a new conversation to pick up file changes.
+      </p>
+      <details>
+        <summary data-i18n="Skill directories">
+          Skill directories
+        </summary>
+        <pre id="skills-directories">
+        </pre>
+      </details>
+      <button id="skills-refresh" type="button" class="secondary" data-i18n="Refresh status">Refresh status</button>
+      <div id="skills-error" class="error-banner" role="alert" hidden>
+      </div>
+      <div id="skills-list" aria-live="polite">
+      </div>
+      <details id="skills-diagnostics" hidden>
+        <summary data-i18n="Discovery errors">
+          Discovery errors
+        </summary>
+        <pre id="skills-diagnostics-text">
+        </pre>
+      </details>
+    </dialog>
+    <dialog id="jev-settings">
+      <form id="jev-form">
+        <div class="dialog-heading">
+          <h2 data-i18n="Jev routing">
+            Jev routing
+          </h2>
+          <button type="button" id="close-jev" aria-label="Close settings" data-i18n-aria-label="Close settings">×</button>
+        </div>
+        <p data-i18n="Let Jev select relevant tools while your main model handles reasoning and replies.">
+          Let Jev select relevant tools while your main model handles reasoning and replies.
+        </p>
+        <label class="mcp-enabled"><input id="jev-enabled" type="checkbox"><span data-i18n="Enable Jev routing">Enable Jev routing</span></label><label><span data-i18n="TypeSafe API key">TypeSafe API key</span><input id="jev-key" type="password" autocomplete="off"></label><label><span data-i18n="Model">Model</span><input id="jev-model" required maxlength="200" value="jev-latest"></label><label><span data-i18n="Minimum confidence">Minimum confidence</span><input id="jev-confidence" type="number" min="0" max="1" step="0.01" value="0.8" required></label>
+        <p data-i18n="When Jev is uncertain or unavailable, the main model chooses from all tools.">
+          When Jev is uncertain or unavailable, the main model chooses from all tools.
+        </p>
+        <small class="muted" data-i18n="When enabled, conversation context, memory, and tool descriptions are sent to TypeSafe. Your key is stored locally. Saving starts a new conversation.">When enabled, conversation context, memory, and tool descriptions are sent to TypeSafe. Your key is stored locally. Saving starts a new conversation.</small>
+        <div id="jev-error" class="error-banner" role="alert" hidden>
+        </div>
+        <button id="jev-save" class="primary" type="submit" data-i18n="Save settings">Save settings</button>
+      </form>
+    </dialog>
+    <dialog id="reset-dialog">
+      <h2 data-i18n="Start a new conversation?">
+        Start a new conversation?
+      </h2>
+      <p data-i18n="This clears the current chat and task plan. Your saved memory stays.">
+        This clears the current chat and task plan. Your saved memory stays.
+      </p>
+      <div class="dialog-actions">
+        <button id="cancel-reset" data-i18n="Keep chatting">Keep chatting</button><button id="confirm-reset" class="primary" data-i18n="New conversation">New conversation</button>
+      </div>
+    </dialog>
+    <dialog id="mcp-settings">
+      <div class="dialog-heading">
+        <h2 data-i18n="MCP servers">
+          MCP servers
+        </h2>
+        <button type="button" id="close-mcp" aria-label="Close settings" data-i18n-aria-label="Close settings">×</button>
+      </div>
+      <p data-i18n="Connect local or remote MCP services. Enabled services connect when a conversation needs them.">
+        Connect local or remote MCP services. Enabled services connect when a conversation needs them.
+      </p>
+      <p class="mcp-notice" data-i18n="Saving, enabling, or removing a server starts a new conversation. Your memory stays.">
+        Saving, enabling, or removing a server starts a new conversation. Your memory stays.
+      </p>
+      <div id="mcp-error" class="error-banner" role="alert" hidden>
+      </div>
+      <div class="mcp-layout">
+        <div class="mcp-sidebar">
+          <button type="button" id="mcp-filesystem" class="secondary" data-i18n="Built-in Filesystem">Built-in Filesystem</button><button type="button" id="mcp-add" class="secondary" data-i18n="Add server">Add server</button><button type="button" id="mcp-refresh" class="secondary" data-i18n="Refresh status">Refresh status</button>
+          <p class="muted" data-i18n="Status is based on the last connection check.">
+            Status is based on the last connection check.
+          </p>
+          <div id="mcp-list">
+          </div>
+          <small class="muted" data-i18n="The built-in demo server is always available.">The built-in demo server is always available.</small>
+        </div>
+        <form id="mcp-form">
+          <section id="mcp-filesystem-fields" hidden>
+            <h3 data-i18n="Filesystem">
+              Filesystem
+            </h3>
+            <p data-i18n="Read, write, and organize files in your chosen folder. Bundled with agent0; no installation needed.">
+              Read, write, and organize files in your chosen folder. Bundled with agent0; no installation needed.
+            </p>
+            <label><span data-i18n="Allowed folder">Allowed folder</span><input id="mcp-directory" readonly placeholder="Choose a folder to get started" data-i18n-placeholder="Choose a folder to get started"></label><button type="button" id="mcp-pick-directory" class="secondary" data-i18n="Choose folder">Choose folder</button>
+            <p data-i18n="Only this folder and its subfolders are accessible. Save to enable access.">
+              Only this folder and its subfolders are accessible. Save to enable access.
+            </p>
+          </section>
+          <label data-mcp-external><span data-i18n="Connection type">Connection type</span><select id="mcp-transport"><option value="stdio" data-i18n="Local command (stdio)">Local command (stdio)</option><option value="http" data-i18n="Remote HTTP (Streamable HTTP)">Remote HTTP (Streamable HTTP)</option><option value="sse" data-i18n="Remote SSE (legacy)">Remote SSE (legacy)</option></select></label><label data-mcp-external><span data-i18n="Server ID">Server ID</span><input id="mcp-id" required pattern="[a-z][a-z0-9_\-]{0,23}" maxlength="24" placeholder="my-server"><small class="muted" data-i18n="Use lowercase letters, digits, hyphens, or underscores; start with a letter.">Use lowercase letters, digits, hyphens, or underscores; start with a letter.</small></label><label data-mcp-stdio><span data-i18n="Command">Command</span><input id="mcp-command" required placeholder="/absolute/path/to/pnpm"><small class="muted" data-i18n="Use an absolute executable path if the app cannot find your command.">Use an absolute executable path if the app cannot find your command.</small></label><label data-mcp-stdio><span data-i18n="Arguments (JSON array)">Arguments (JSON array)</span><textarea id="mcp-args" rows="2" spellcheck="false">[]</textarea></label><label data-mcp-stdio><span data-i18n="Environment variables (JSON object)">Environment variables (JSON object)</span><textarea id="mcp-env" rows="2" spellcheck="false">{}</textarea></label><label data-mcp-stdio><span data-i18n="Working directory">Working directory</span><input id="mcp-cwd" placeholder="Optional absolute directory" data-i18n-placeholder="Optional absolute directory"></label>
+          <section id="mcp-remote-fields" hidden>
+            <label><span data-i18n="Server URL">Server URL</span><input id="mcp-url" type="url" placeholder="https://example.com/mcp"><small class="muted" data-i18n="Use the MCP endpoint URL provided by your service.">Use the MCP endpoint URL provided by your service.</small></label><label><span data-i18n="Request headers (JSON object)">Request headers (JSON object)</span><textarea id="mcp-headers" rows="3" spellcheck="false" placeholder='{"Authorization":"Bearer your-token"}'>{}</textarea></label><small class="muted" data-i18n="Optional: Authorization or API key headers. Browser OAuth sign-in is not supported yet.">Optional: Authorization or API key headers. Browser OAuth sign-in is not supported yet.</small>
+          </section>
+          <label class="mcp-enabled"><input id="mcp-enabled" type="checkbox" checked><span data-i18n="Enabled">Enabled</span></label>
+          <div class="mcp-actions">
+            <button type="button" id="mcp-test" class="secondary" data-i18n="Test connection">Test connection</button><button type="submit" id="mcp-save" class="primary" data-i18n="Save server">Save server</button>
+          </div>
+          <div id="mcp-result" role="status" aria-live="polite">
+          </div>
+          <div id="mcp-tools">
+          </div>
+        </form>
+      </div>
+    </dialog>
+    <script type="module" src="app.js"></script>
+  </body>
 </html>
