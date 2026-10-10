@@ -108,6 +108,28 @@ function text(value: string, name: string, max = 8000): string {
   return normalized;
 }
 
+
+function validateDependencyGraph(tasks: Array<{ dependsOn?: number[] }>): void {
+  const visiting = new Set<number>();
+  const visited = new Set<number>();
+
+  const visit = (index: number) => {
+    if (visiting.has(index)) throw new Error('Mission task dependencies contain a cycle.');
+    if (visited.has(index)) return;
+    visiting.add(index);
+    for (const dependency of tasks[index]?.dependsOn ?? []) {
+      if (!Number.isInteger(dependency) || dependency < 0 || dependency >= tasks.length || dependency === index) {
+        throw new Error(`Invalid task dependency index: ${dependency}`);
+      }
+      visit(dependency);
+    }
+    visiting.delete(index);
+    visited.add(index);
+  };
+
+  for (let index = 0; index < tasks.length; index += 1) visit(index);
+}
+
 function missionStatus(tasks: MissionTask[], handoff?: MissionHandoff): Mission['status'] {
   if (handoff?.status === 'pending') return 'blocked';
   if (tasks.length > 0 && tasks.every((task) => task.status === 'completed')) return 'completed';
@@ -174,22 +196,26 @@ export function createFileMissionStore(root = 'data/autonomy'): MissionStore {
 
   return {
     async create(goal, tasks) {
+      if (!tasks.length) throw new Error('Mission requires at least one task.');
+      validateDependencyGraph(tasks);
       const missionId = randomUUID();
       const now = new Date().toISOString();
       const ids = tasks.map(() => randomUUID());
-      const missionTasks: MissionTask[] = tasks.map((task, index) => ({
+      let firstReadyAssigned = false;
+      const missionTasks: MissionTask[] = tasks.map((task, index) => {
+        const dependencies = task.dependsOn ?? [];
+        const ready = dependencies.length === 0;
+        const status: MissionTaskStatus = ready && !firstReadyAssigned ? 'in_progress' : 'pending';
+        if (status === 'in_progress') firstReadyAssigned = true;
+        return {
         id: ids[index]!,
         title: text(task.title, 'Task', 1000),
-        status: index === 0 && !(task.dependsOn?.length) ? 'in_progress' : 'pending',
-        dependsOn: (task.dependsOn ?? []).map((dependency) => {
-          if (!Number.isInteger(dependency) || dependency < 0 || dependency >= ids.length || dependency === index) {
-            throw new Error(`Invalid task dependency index: ${dependency}`);
-          }
-          return ids[dependency]!;
-        }),
+        status,
+        dependsOn: dependencies.map((dependency) => ids[dependency]!),
         createdAt: now,
         updatedAt: now,
-      }));
+      };
+      });
 
       const mission: Mission = {
         version: 1,
