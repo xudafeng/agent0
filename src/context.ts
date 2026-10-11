@@ -8,6 +8,7 @@ export interface ContextBudget {
   taskChars: number;
   computerChars: number;
   personalChars: number;
+  autonomyChars: number;
 }
 
 const DEFAULT_CONTEXT_BUDGET: ContextBudget = {
@@ -17,6 +18,7 @@ const DEFAULT_CONTEXT_BUDGET: ContextBudget = {
   taskChars: 3000,
   computerChars: 1500,
   personalChars: 4000,
+  autonomyChars: 5000,
 };
 
 function clamp(value: string, maxChars: number, keepEnd = false): string {
@@ -70,6 +72,7 @@ export function buildContext(
   computerContext = '',
   budget: Partial<ContextBudget> = {},
   personalContext = '',
+  autonomyContext = '',
 ): Message[] {
   const limits = { ...DEFAULT_CONTEXT_BUDGET, ...budget };
   const recentConversation = selectRecentConversation(messages, limits.conversationChars);
@@ -79,6 +82,7 @@ export function buildContext(
     skillContext ? clamp(skillContext, limits.skillChars) : '',
     memoryContext ? `Relevant persistent memory:\n\n${clamp(memoryContext, limits.memoryChars)}` : '',
     personalContext ? `Current personal state:\n\n${clamp(personalContext, limits.personalChars)}` : '',
+    autonomyContext ? `Current autonomous mission:\n\n${clamp(autonomyContext, limits.autonomyChars)}` : '',
     task ? `Current task state:\n\n${clamp(task, limits.taskChars)}` : '',
   ].filter(Boolean);
 

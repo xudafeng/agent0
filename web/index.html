@@ -89,6 +89,26 @@
       <div class="inspector-title">
         <span data-i18n="Agent workspace">Agent workspace</span> <span>◌</span>
       </div>
+      <section class="autonomy-section">
+        <div class="panel-heading">
+          <h2>Mission</h2>
+          <button id="autonomy-refresh" type="button" class="panel-action" title="Refresh autonomous mission" aria-label="Refresh autonomous mission">↻</button>
+        </div>
+        <div id="autonomy-empty" class="empty-panel">No active mission.</div>
+        <div id="autonomy-content" hidden>
+          <div id="autonomy-goal" class="autonomy-goal"></div>
+          <div id="autonomy-progress" class="autonomy-progress"></div>
+          <div id="autonomy-tasks"></div>
+          <div id="autonomy-evaluation" class="autonomy-evaluation" hidden></div>
+          <form id="autonomy-handoff" class="autonomy-handoff" hidden>
+            <strong>Needs your input</strong>
+            <p id="autonomy-handoff-question"></p>
+            <textarea id="autonomy-handoff-response" rows="2" maxlength="8000" placeholder="Reply to the agent…"></textarea>
+            <button type="submit" class="primary">Resume mission</button>
+          </form>
+          <div id="autonomy-artifacts"></div>
+        </div>
+      </section>
       <section class="personal-section">
         <div class="panel-heading">
           <h2>
@@ -160,6 +180,17 @@
         LESS FRICTION. MORE DOING.
       </div>
     </aside>
+    <dialog id="artifact-dialog" aria-labelledby="artifact-dialog-title">
+      <div class="dialog-heading">
+        <div>
+          <div class="eyebrow">ARTIFACT</div>
+          <h2 id="artifact-dialog-title">Artifact</h2>
+        </div>
+        <button type="button" id="close-artifact-dialog" aria-label="Close">×</button>
+      </div>
+      <div id="artifact-dialog-meta" class="muted"></div>
+      <pre id="artifact-dialog-content" class="artifact-content"></pre>
+    </dialog>
     <dialog id="personal-dialog" aria-labelledby="personal-dialog-title">
       <div class="dialog-heading">
         <div>

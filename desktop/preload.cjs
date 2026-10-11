@@ -2,6 +2,9 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('agent0', {
   state: () => ipcRenderer.invoke('agent:state'),
+  autonomyState: () => ipcRenderer.invoke('agent:autonomy-state'),
+  resolveHandoff: (missionId, response) => ipcRenderer.invoke('agent:autonomy-resolve-handoff', { missionId, response }),
+  artifactRead: (artifactId) => ipcRenderer.invoke('agent:artifact-read', artifactId),
   personalState: () => ipcRenderer.invoke('agent:personal-state'),
   personalSetFocus: (focus) => ipcRenderer.invoke('agent:personal-set-focus', focus),
   personalAddGoal: (title) => ipcRenderer.invoke('agent:personal-add-goal', title),

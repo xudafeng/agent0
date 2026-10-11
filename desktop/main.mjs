@@ -16,6 +16,8 @@ import { configuredComputerBackend, openSessionComputer } from '../dist/session-
 import { createDurableScheduler } from '../dist/scheduler.js';
 import { listDurableJobs, readDurableJobOutput } from '../dist/job.js';
 import { createFilePersonalStateStore } from '../dist/personal-state.js';
+import { createFileMissionStore } from '../dist/autonomy.js';
+import { createFileArtifactStore } from '../dist/artifact.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const icon = path.join(root, 'desktop/assets/icon.png');
@@ -31,6 +33,8 @@ let configPath;
 let savedMemory = '';
 let memoryStore;
 let personalStateStore;
+let missionStore;
+let artifactStore;
 let sessionStore;
 let workspaceStore;
 let computerBackend;
@@ -153,12 +157,14 @@ async function getRuntime() {
       ...(activeComputer ? { computer: activeComputer } : {}),
       memoryStore,
       personalStateStore,
+      missionStore,
+      artifactStore,
       toolPolicy: (toolCall) => {
         if (toolCall.name.startsWith('mcp_')) {
           return { action: 'ask', reason: 'MCP tool requires approval before execution.' };
         }
-        if (toolCall.name === 'computer_exec' || toolCall.name === 'computer_write_file' || toolCall.name === 'computer_start_process' || toolCall.name === 'job_start' || toolCall.name === 'schedule_create' || toolCall.name === 'schedule_create_cron' || toolCall.name === 'schedule_cancel' || toolCall.name === 'memory_remember' || toolCall.name === 'memory_update' || toolCall.name === 'memory_forget' || (toolCall.name.startsWith('personal_') && toolCall.name !== 'personal_state')) {
-          return { action: 'ask', reason: toolCall.name.startsWith('memory_') ? 'Persistent memory changes require approval before execution.' : toolCall.name.startsWith('personal_') ? 'Personal agent state changes require approval before execution.' : 'Computer command, file change, background job, or schedule change requires approval before execution.' };
+        if (toolCall.name === 'computer_exec' || toolCall.name === 'computer_write_file' || toolCall.name === 'computer_start_process' || toolCall.name === 'job_start' || toolCall.name === 'schedule_create' || toolCall.name === 'schedule_create_cron' || toolCall.name === 'schedule_cancel' || toolCall.name === 'memory_remember' || toolCall.name === 'memory_update' || toolCall.name === 'memory_forget' || (toolCall.name.startsWith('personal_') && toolCall.name !== 'personal_state') || ['autonomy_create_mission', 'autonomy_update_task', 'autonomy_delegate_parallel', 'artifact_create', 'autonomy_request_handoff', 'autonomy_evaluate'].includes(toolCall.name)) {
+          return { action: 'ask', reason: toolCall.name.startsWith('memory_') ? 'Persistent memory changes require approval before execution.' : toolCall.name.startsWith('personal_') ? 'Personal agent state changes require approval before execution.' : toolCall.name.startsWith('autonomy_') || toolCall.name === 'artifact_create' ? 'Autonomous mission changes require approval before execution.' : 'Computer command, file change, background job, or schedule change requires approval before execution.' };
         }
         return { action: 'allow' };
       },
@@ -234,7 +240,7 @@ function text(value, name, limit = 32000) {
 function handle(name, action) {
   ipcMain.handle(`agent:${name}`, async (event, payload) => {
     if (event.sender !== window?.webContents || event.senderFrame !== window.webContents.mainFrame) throw new Error('Unknown sender.');
-    if (name === 'state' || name === 'mcp-list' || name === 'background-state' || name === 'background-job-output' || name === 'memory-list' || name === 'memory-search' || name === 'personal-state') return action(payload);
+    if (name === 'state' || name === 'mcp-list' || name === 'background-state' || name === 'background-job-output' || name === 'memory-list' || name === 'memory-search' || name === 'personal-state' || name === 'autonomy-state' || name === 'artifact-read') return action(payload);
     if (busy) throw new Error('Wait for the current operation to finish.');
     busy = true;
     publish('state', state());
@@ -368,6 +374,25 @@ handle('session-delete', async (id) => {
   pendingSessionState = snapshot ? structuredClone(snapshot.runtime) : undefined;
   events = [];
 });
+handle('autonomy-state', async () => {
+  const missions = await missionStore.list();
+  return {
+    missions,
+    activeMission: missions.find((mission) => mission.status !== 'completed') ?? null,
+    artifacts: await artifactStore.list(),
+  };
+});
+handle('autonomy-resolve-handoff', async (input) => {
+  if (!input || typeof input.missionId !== 'string' || typeof input.response !== 'string') {
+    throw new Error('Invalid human handoff response.');
+  }
+  return missionStore.resolveHandoff(input.missionId, input.response);
+});
+handle('artifact-read', async (artifactId) => {
+  if (typeof artifactId !== 'string') throw new Error('Invalid artifact ID.');
+  return artifactStore.read(artifactId);
+});
+
 handle('personal-state', () => personalStateStore.get());
 handle('personal-set-focus', async (focus) => {
   if (typeof focus !== 'string') throw new Error('Invalid daily focus.');
@@ -575,6 +600,8 @@ app.whenReady().then(async () => {
   dotenv.config({ path: configPath, override: true, quiet: true });
   memoryStore = createFileMemoryStore();
   personalStateStore = createFilePersonalStateStore();
+  missionStore = createFileMissionStore();
+  artifactStore = createFileArtifactStore();
   savedMemory = await memoryStore.render();
   sessionStore = createFileSessionStore();
   workspaceStore = createFileWorkspaceStore();
