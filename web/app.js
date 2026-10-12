@@ -11,6 +11,7 @@ let renderedHistory = '';
 let renderedSessions = '';
 let progressEvent;
 let keepSavedKey = false;
+let keepSavedExaKey = false;
 let backgroundSessionId = '';
 let backgroundLoading = false;
 let memoryEntries = [];
@@ -574,8 +575,12 @@ function settings() {
   $('model').value = config.model;
   $('base-url').value = config.baseURL || 'https://api.moonshot.cn/v1';
   $('api-key').value = '';
+  $('exa-api-key').value = '';
   keepSavedKey = config.configured;
+  keepSavedExaKey = Boolean(config.exa?.configured);
   $('api-key').placeholder = keepSavedKey ? t('Leave blank to keep the saved key') : t('Enter your API key');
+  $('exa-api-key').placeholder = keepSavedExaKey ? t('Leave blank to keep the saved key') : t('Enter your Exa API key');
+  $('exa-api-key').placeholder = keepSavedExaKey ? t('Leave blank to keep the saved key') : t('Enter your Exa API key');
   $('settings-error').hidden = true;
   $('base-url-field').hidden = $('provider').value === 'openai';
   $('settings').showModal();
@@ -634,8 +639,15 @@ $('settings-form').onsubmit = async (event) => {
   $('save-settings').disabled = true;
   $('settings-error').hidden = true;
   try {
-    await api.configure({ provider: $('provider').value, model: $('model').value, baseURL: $('base-url').value, apiKey: $('api-key').value });
+    await api.configure({
+      provider: $('provider').value,
+      model: $('model').value,
+      baseURL: $('base-url').value,
+      apiKey: $('api-key').value,
+      exaApiKey: $('exa-api-key').value,
+    });
     $('api-key').value = '';
+    $('exa-api-key').value = '';
     $('settings').close();
     $('error').hidden = true;
     $('prompt').focus();
