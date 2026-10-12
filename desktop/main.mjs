@@ -558,14 +558,15 @@ handle('remember', async (content) => {
   savedMemory = runtime.getMemory();
 });
 handle('configure', async (input) => {
-  if (!input || !['openai', 'kimi'].includes(input.provider) || typeof input.exaApiKey !== 'string') {
+  if (!input || !['openai', 'kimi'].includes(input.provider) ||
+      (input.exaApiKey !== undefined && typeof input.exaApiKey !== 'string')) {
     throw new Error('Choose a provider.');
   }
   const model = text(input.model, 'model', 200);
   const prefix = input.provider === 'kimi' ? 'MOONSHOT' : 'OPENAI';
   const apiKey = input.apiKey ? text(input.apiKey, 'API key', 2000) : process.env[`${prefix}_API_KEY`];
   if (!apiKey) throw new Error('Enter an API key.');
-  const exaApiKey = input.exaApiKey.trim();
+  const exaApiKey = typeof input.exaApiKey === 'string' ? input.exaApiKey.trim() : '';
   const values = {
     LLM_PROVIDER: input.provider,
     [`${prefix}_MODEL`]: model,
@@ -600,6 +601,7 @@ app.whenReady().then(async () => {
     process.env.AGENT0_SKILL_DIRS = '[]';
     process.env.MOONSHOT_API_KEY = '';
     process.env.OPENAI_API_KEY = '';
+    delete process.env.EXA_API_KEY;
     delete process.env.AGENT0_COMPUTER;
     delete process.env.E2B_API_KEY;
   }
