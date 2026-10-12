@@ -580,7 +580,6 @@ function settings() {
   keepSavedExaKey = Boolean(config.exa?.configured);
   $('api-key').placeholder = keepSavedKey ? t('Leave blank to keep the saved key') : t('Enter your API key');
   $('exa-api-key').placeholder = keepSavedExaKey ? t('Leave blank to keep the saved key') : t('Enter your Exa API key');
-  $('exa-api-key').placeholder = keepSavedExaKey ? t('Leave blank to keep the saved key') : t('Enter your Exa API key');
   $('settings-error').hidden = true;
   $('base-url-field').hidden = $('provider').value === 'openai';
   $('settings').showModal();
@@ -604,6 +603,7 @@ for (const select of document.querySelectorAll('[data-language]')) select.onchan
   if (current) render(current);
   renderProgress();
   $('api-key').placeholder = keepSavedKey ? t('Leave blank to keep the saved key') : t('Enter your API key');
+  $('exa-api-key').placeholder = keepSavedExaKey ? t('Leave blank to keep the saved key') : t('Enter your Exa API key');
   for (const target of ['error', 'settings-error']) {
     if ($(target).dataset.error) $(target).textContent = t($(target).dataset.error);
   }
