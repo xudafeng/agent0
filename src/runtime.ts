@@ -13,6 +13,8 @@ import { createPersonalStateTools } from './personal-state-tools.js';
 import { createFileMissionStore, formatMission, type Mission, type MissionStore } from './autonomy.js';
 import { createFileArtifactStore, type ArtifactStore } from './artifact.js';
 import { createAutonomyTools } from './autonomy-tools.js';
+import { configuredExaClient, type ExaClient } from './exa.js';
+import { createWebTools } from './web-tools.js';
 import { connectMcpServers } from './mcp.js';
 import { getProvider, type Message, type Provider } from './provider.js';
 import { createFileRunStore, type RunCheckpoint, type RunStore, type RunStatus } from './run-store.js';
@@ -37,6 +39,7 @@ export interface RuntimeOptions {
   personalStateStore?: PersonalStateStore;
   missionStore?: MissionStore;
   artifactStore?: ArtifactStore;
+  exaClient?: ExaClient | null;
 }
 
 export interface RunResult {
@@ -91,6 +94,7 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
   const personalStateStore = options.personalStateStore ?? createFilePersonalStateStore();
   const missionStore = options.missionStore ?? createFileMissionStore();
   const artifactStore = options.artifactStore ?? createFileArtifactStore();
+  const exaClient = options.exaClient === undefined ? configuredExaClient() : options.exaClient ?? undefined;
   let memory = await memoryStore.render();
   const refreshMemory = async () => { memory = await memoryStore.render(); };
   const toolRegistry = createToolRegistry([
@@ -98,6 +102,7 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
     ...createMemoryTools(memoryStore, refreshMemory),
     ...createPersonalStateTools(personalStateStore),
     ...createAutonomyTools(missionStore, artifactStore, provider),
+    ...(exaClient ? createWebTools(exaClient) : []),
     ...(options.computer ? [...createComputerTools(options.computer), ...createJobTools(options.computer)] : []),
     ...(scheduler ? createSchedulerTools(scheduler) : []),
     ...adaptToolDefinitions(skills.tools, (toolCall, context) => skills.callTool(toolCall, context.signal), 'sequential'),
