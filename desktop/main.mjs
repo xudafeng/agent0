@@ -52,6 +52,7 @@ function configuration() {
     model: process.env[kimi ? 'MOONSHOT_MODEL' : 'OPENAI_MODEL'] || '',
     baseURL: kimi ? process.env.MOONSHOT_BASE_URL || 'https://api.moonshot.cn/v1' : '',
     configured: Boolean(process.env[kimi ? 'MOONSHOT_API_KEY' : 'OPENAI_API_KEY']),
+    exa: { configured: Boolean(process.env.EXA_API_KEY?.trim()) },
     jev: jevConfiguration(),
   };
 }
@@ -557,12 +558,20 @@ handle('remember', async (content) => {
   savedMemory = runtime.getMemory();
 });
 handle('configure', async (input) => {
-  if (!input || !['openai', 'kimi'].includes(input.provider)) throw new Error('Choose a provider.');
+  if (!input || !['openai', 'kimi'].includes(input.provider) || typeof input.exaApiKey !== 'string') {
+    throw new Error('Choose a provider.');
+  }
   const model = text(input.model, 'model', 200);
   const prefix = input.provider === 'kimi' ? 'MOONSHOT' : 'OPENAI';
   const apiKey = input.apiKey ? text(input.apiKey, 'API key', 2000) : process.env[`${prefix}_API_KEY`];
   if (!apiKey) throw new Error('Enter an API key.');
-  const values = { LLM_PROVIDER: input.provider, [`${prefix}_MODEL`]: model, [`${prefix}_API_KEY`]: apiKey };
+  const exaApiKey = input.exaApiKey.trim();
+  const values = {
+    LLM_PROVIDER: input.provider,
+    [`${prefix}_MODEL`]: model,
+    [`${prefix}_API_KEY`]: apiKey,
+    ...(exaApiKey ? { EXA_API_KEY: text(exaApiKey, 'Exa API key', 2000) } : {}),
+  };
   if (input.provider === 'kimi') {
     const url = new URL(text(input.baseURL, 'base URL', 2000));
     if (!['https:', 'http:'].includes(url.protocol)) throw new Error('Use an HTTP or HTTPS base URL.');
