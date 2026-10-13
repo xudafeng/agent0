@@ -29,6 +29,8 @@ import { adaptToolDefinitions, createToolRegistry, localAgentTools, ToolExecutio
 export interface RuntimeOptions {
   maxSteps?: number;
   skillDirectories?: string[];
+  skillRoots?: string[];
+  tracePath?: string;
   toolPolicy?: ToolExecutionPolicy;
   requestToolApproval?: ToolApprovalHandler;
   runStore?: RunStore;
@@ -85,7 +87,7 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
   const executionLedger = options.executionLedger ?? createFileToolExecutionLedger();
   const route = createJevRouter();
   const messages: Message[] = [];
-  const skills = await createSkillRuntime(options.skillDirectories);
+  const skills = await createSkillRuntime(options.skillDirectories, options.skillRoots);
   const mcp = await connectMcpServers();
   const taskRuntime = createTaskRuntime();
   const subagentRuntime = createSubagentRuntime(provider);
@@ -137,7 +139,7 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
   ): Promise<RunResult> => {
     const { onEvent, signal } = runOptions;
     signal?.throwIfAborted();
-    const trace = await createTraceRecorder();
+    const trace = await createTraceRecorder(options.tracePath);
     const emit = async (event: AgentEvent) => {
       await trace.record(event);
       await onEvent?.(event);
