@@ -320,6 +320,7 @@ async function openJobOutput(job) {
 function renderBackground(data) {
   const schedules = data?.schedules ?? [];
   const jobs = data?.jobs ?? [];
+  const agentRuns = data?.agentRuns ?? [];
   $('background-next').textContent = data?.nextWakeAt
     ? `Next wake · ${formatBackgroundTime(data.nextWakeAt)}`
     : data?.configured ? 'No pending schedules.' : 'Configure a computer backend to use background work.';
@@ -368,8 +369,24 @@ function renderBackground(data) {
     return button;
   }));
 
+  $('background-agent-runs').replaceChildren(...agentRuns.slice(0, 6).map((run) => {
+    const row = element('div', 'background-row');
+    const body = element('div', 'background-row-body');
+    body.append(
+      element('strong', '', `${backgroundStateBadge(run.status)} ${run.skillName || 'Agent'}`),
+      element('small', '', [
+        run.status,
+        run.trigger,
+        run.sessionId ? `session ${run.sessionId.slice(0, 8)}` : '',
+      ].filter(Boolean).join(' · ')),
+    );
+    row.append(body);
+    return row;
+  }));
+
   if (!schedules.length) $('background-schedules').replaceChildren();
   if (!jobs.length) $('background-jobs').replaceChildren();
+  if (!agentRuns.length) $('background-agent-runs').replaceChildren();
 }
 
 async function refreshBackground() {

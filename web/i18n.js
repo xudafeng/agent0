@@ -119,6 +119,7 @@ const chinese = {
   'A little structure goes a long way.': '清晰的步骤，让行动更有方向。',
   'Your task plan will appear here.': '任务计划会显示在这里。',
   'Activity': '活动',
+  'Agent runs': 'Agent 运行',
   'Tool calls and progress,': '工具调用与进度，',
   'as they happen.': '实时呈现。',
   'Memory': '记忆',
