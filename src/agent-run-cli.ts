@@ -187,12 +187,12 @@ async function main(): Promise<void> {
     policy: options.policy,
     trigger: options.trigger,
     ...(options.resumeAgentRunId === undefined ? {} : { resumeAgentRunId: options.resumeAgentRunId }),
-    onEvent: options.json ? undefined : (event) => {
+    ...(options.json ? {} : { onEvent: (event) => {
       if (event.type === 'run_start') console.error(`Run ${event.runId} started.`);
       if (event.type === 'tool_start') console.error(`→ ${event.toolCall.name}`);
       if (event.type === 'tool_end') console.error(`${event.isError ? '!' : '✓'} ${event.name}`);
       if (event.type === 'run_resumed') console.error(`Run resumed from step ${event.fromStep}.`);
-    },
+    } }),
   });
 
   if (options.json) {
