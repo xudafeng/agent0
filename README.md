@@ -289,3 +289,106 @@ browser/MCP fallback only when retrieval is insufficient
 
 Agent0 intentionally does not expose Exa Deep Search or Agent API in this layer. Planning, decomposition, evaluation, and research orchestration remain responsibilities of Agent0's own runtime.
 
+## Headless agent runs
+
+Agent0 can execute a complete Agent workflow without Electron.
+
+```bash
+pnpm agent-run -- \
+  --cwd /path/to/project \
+  --skill radar \
+  --policy trusted-workspace \
+  --prompt "Run the radar workflow."
+```
+
+When `--skill` is used with `--cwd` and no explicit `--skill-dir`, Agent0 treats the working directory itself as a standalone skill root and loads its repository-level `SKILL.md`.
+
+You can also specify standalone skill roots explicitly:
+
+```bash
+pnpm agent-run -- \
+  --cwd /path/to/project \
+  --skill-dir /path/to/project \
+  --skill radar \
+  --prompt "Run radar."
+```
+
+### Profile and working directory
+
+Headless execution separates Agent0 state from the project being operated on:
+
+```
+Agent0 profile
+└── data/
+    ├── agent-runs/
+    ├── headless-sessions/
+    ├── runs/
+    ├── executions/
+    ├── memory/
+    ├── personal/
+    ├── autonomy/
+    ├── artifacts/
+    └── traces.ndjson
+
+External working directory
+└── project files operated on by computer_* tools
+```
+
+The external directory is used directly rather than copied into Agent0. Passing `--cwd` does not change the process-wide working directory, so Agent0 state does not leak into the target repository.
+
+### Non-interactive policies
+
+Headless runs cannot stop and wait for a desktop approval dialog.
+
+- `read-only` is the default. It allows research, retrieval, skill loading, and other read-only operations while blocking persistent mutations and computer execution/write tools.
+- `trusted-workspace` allows non-interactive mutations and command execution. Use it only for a working directory and skill instructions you trust.
+
+MCP tools are disabled in headless mode by default because their side effects are not visible to the local policy boundary.
+
+### Durable AgentRun records
+
+Each invocation creates a durable `AgentRun` record with:
+
+- prompt
+- trigger
+- policy
+- session
+- working directory
+- skill
+- runtime run ID
+- status
+- result or error
+
+Inspect recent runs with:
+
+```bash
+pnpm agent-run -- --list
+pnpm agent-run -- --status <agentRunId>
+```
+
+Recent AgentRuns are also visible in the desktop Background inspector.
+
+### Session continuity
+
+Pass a prior headless session ID to continue conversation/runtime state:
+
+```bash
+pnpm agent-run -- \
+  --session <sessionId> \
+  --prompt "Continue the work."
+```
+
+Headless sessions are stored separately from desktop conversations so background activity does not change the desktop's active chat.
+
+### Crash recovery
+
+A hard process crash leaves the AgentRun in `running` state and preserves the runtime checkpoint ID captured at `run_start`.
+
+Resume it with:
+
+```bash
+pnpm agent-run -- --resume-agent-run <agentRunId>
+```
+
+The run resumes from the last durable runtime checkpoint instead of restarting the original prompt.
+
