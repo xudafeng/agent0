@@ -195,9 +195,13 @@ export async function runHeadlessAgent(options: HeadlessAgentRunOptions): Promis
       await options.onEvent?.(event);
     };
 
+    const runOptions = {
+      onEvent,
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+    };
     const result = resumeRuntimeRunId
-      ? await runtime.resume(resumeRuntimeRunId, { signal: options.signal, onEvent })
-      : await runtime.run(prompt, { signal: options.signal, onEvent });
+      ? await runtime.resume(resumeRuntimeRunId, runOptions)
+      : await runtime.run(prompt, runOptions);
 
     history.push(
       { role: 'user', content: prompt },
