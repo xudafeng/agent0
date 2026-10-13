@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type {
   Computer,
@@ -181,6 +182,16 @@ function createLocalComputer(ref: ComputerRef, filesRoot: string): Computer {
       destroyed = true;
     },
   };
+}
+
+export async function createLocalDirectoryComputer(directory: string): Promise<Computer> {
+  const root = await realpath(resolve(directory));
+  const workspaceId = `external_${createHash('sha256').update(root).digest('hex').slice(0, 16)}`;
+  return createLocalComputer({
+    backend: 'local-directory',
+    id: workspaceId,
+    workspaceId,
+  }, root);
 }
 
 export function createLocalComputerBackend(workspaces: WorkspaceStore): ComputerBackend {
