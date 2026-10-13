@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import dotenv from 'dotenv';
 import { runHeadlessAgent, type HeadlessPolicy } from './agent-run.js';
+import type { AgentEvent } from './events.js';
 import { createFileAgentRunStore } from './agent-run-store.js';
 
 interface CliOptions {
@@ -187,7 +188,7 @@ async function main(): Promise<void> {
     policy: options.policy,
     trigger: options.trigger,
     ...(options.resumeAgentRunId === undefined ? {} : { resumeAgentRunId: options.resumeAgentRunId }),
-    ...(options.json ? {} : { onEvent: (event) => {
+    ...(options.json ? {} : { onEvent: (event: AgentEvent) => {
       if (event.type === 'run_start') console.error(`Run ${event.runId} started.`);
       if (event.type === 'tool_start') console.error(`→ ${event.toolCall.name}`);
       if (event.type === 'tool_end') console.error(`${event.isError ? '!' : '✓'} ${event.name}`);
