@@ -31,6 +31,7 @@ export interface RuntimeOptions {
   skillDirectories?: string[];
   skillRoots?: string[];
   tracePath?: string;
+  enableScheduler?: boolean;
   toolPolicy?: ToolExecutionPolicy;
   requestToolApproval?: ToolApprovalHandler;
   runStore?: RunStore;
@@ -91,7 +92,9 @@ export async function createAgentRuntime(options: RuntimeOptions = {}): Promise<
   const mcp = await connectMcpServers();
   const taskRuntime = createTaskRuntime();
   const subagentRuntime = createSubagentRuntime(provider);
-  const scheduler = options.computer ? await createDurableScheduler(options.computer) : undefined;
+  const scheduler = options.computer && (options.enableScheduler ?? true)
+    ? await createDurableScheduler(options.computer)
+    : undefined;
   const memoryStore = options.memoryStore ?? createFileMemoryStore();
   const personalStateStore = options.personalStateStore ?? createFilePersonalStateStore();
   const missionStore = options.missionStore ?? createFileMissionStore();
