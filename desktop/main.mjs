@@ -16,6 +16,7 @@ import { configuredComputerBackend, openSessionComputer } from '../dist/session-
 import { createDurableScheduler } from '../dist/scheduler.js';
 import { listDurableJobs, readDurableJobOutput } from '../dist/job.js';
 import { createFilePersonalStateStore } from '../dist/personal-state.js';
+import { createFileAgentRunStore } from '../dist/agent-run-store.js';
 import { createFileMissionStore } from '../dist/autonomy.js';
 import { createFileArtifactStore } from '../dist/artifact.js';
 
@@ -35,6 +36,7 @@ let memoryStore;
 let personalStateStore;
 let missionStore;
 let artifactStore;
+let agentRunStore;
 let sessionStore;
 let workspaceStore;
 let computerBackend;
@@ -301,6 +303,7 @@ async function backgroundState() {
         nextWakeAt: scheduler.nextWakeAt(),
         schedules,
         jobs,
+        agentRuns: (await agentRunStore.list()).slice(0, 8),
       };
     } finally {
       await scheduler.close();
@@ -312,6 +315,7 @@ async function backgroundState() {
     nextWakeAt: undefined,
     schedules: [],
     jobs: [],
+    agentRuns: (await agentRunStore.list()).slice(0, 8),
   };
 }
 
@@ -613,6 +617,7 @@ app.whenReady().then(async () => {
   personalStateStore = createFilePersonalStateStore();
   missionStore = createFileMissionStore();
   artifactStore = createFileArtifactStore();
+  agentRunStore = createFileAgentRunStore();
   savedMemory = await memoryStore.render();
   sessionStore = createFileSessionStore();
   workspaceStore = createFileWorkspaceStore();
