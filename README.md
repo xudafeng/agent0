@@ -246,3 +246,46 @@ When the agent cannot safely or correctly continue without user judgment, `auton
 
 Agents can create durable Markdown, text, or JSON artifacts, attach them to a mission, and reopen them from the desktop Mission panel.
 
+## Web research with Exa
+
+Agent0 can expose native web primitives backed by Exa when `EXA_API_KEY` is configured.
+
+```bash
+EXA_API_KEY="..."
+```
+
+The desktop Model settings dialog can save the Exa key locally as well. Saved keys are not returned to the renderer; the UI only receives whether Exa is configured.
+
+### Tools
+
+`web_search` discovers ranked web sources and returns query-relevant highlights. It supports:
+
+- `auto`, `fast`, and `instant` search modes
+- domain allow/block filters
+- publication date range filters
+- content freshness through `maxAgeHours`
+- bounded result and highlight sizes
+
+`web_fetch` retrieves clean content for one known URL:
+
+- `highlights` is the default and recommended mode for agent context
+- `text` returns broader clean page content when document structure or full context is required
+- HTTP(S) URLs with embedded credentials are rejected
+- returned content is capped before it enters the agent loop
+
+Both tools are idempotent, propagate cancellation, use a 30-second tool timeout, and retry transient Exa/network failures up to three times.
+
+The intended research flow is:
+
+```
+web_search
+    ↓
+rank and inspect highlights
+    ↓
+web_fetch on selected URLs
+    ↓
+browser/MCP fallback only when retrieval is insufficient
+```
+
+Agent0 intentionally does not expose Exa Deep Search or Agent API in this layer. Planning, decomposition, evaluation, and research orchestration remain responsibilities of Agent0's own runtime.
+
