@@ -196,15 +196,16 @@ export function createExaClient(options: ExaClientOptions): ExaClient {
     signal?: AbortSignal,
   ): Promise<Record<string, unknown>> => {
     signal?.throwIfAborted();
-    const response = await fetchImpl(`${baseURL}${path}`, {
+    const init: RequestInit = {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
         'x-api-key': apiKey,
       },
       body: JSON.stringify(body),
-      signal,
-    });
+      ...(signal === undefined ? {} : { signal }),
+    };
+    const response = await fetchImpl(`${baseURL}${path}`, init);
     const raw = await readResponseText(response, maxResponseBytes);
     const parsed = raw ? parseJson(raw, response.status) : {};
     if (!response.ok) {
