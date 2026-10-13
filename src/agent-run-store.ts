@@ -70,6 +70,19 @@ export function createFileAgentRunStore(root = 'data/agent-runs'): AgentRunStore
     }
   };
 
+  const loadRecord = async (agentRunId: string): Promise<AgentRunRecord | undefined> => {
+    try {
+      const parsed = JSON.parse(await readFile(pathFor(agentRunId), 'utf8')) as AgentRunRecord;
+      if (parsed.version !== 1 || parsed.agentRunId !== agentRunId) {
+        throw new Error('Invalid agent run record.');
+      }
+      return parsed;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+      throw error;
+    }
+  };
+
   return {
     async create(input) {
       const now = new Date().toISOString();
@@ -97,22 +110,11 @@ export function createFileAgentRunStore(root = 'data/agent-runs'): AgentRunStore
       });
     },
 
-    async load(agentRunId) {
-      try {
-        const parsed = JSON.parse(await readFile(pathFor(agentRunId), 'utf8')) as AgentRunRecord;
-        if (parsed.version !== 1 || parsed.agentRunId !== agentRunId) {
-          throw new Error('Invalid agent run record.');
-        }
-        return parsed;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-        throw error;
-      }
-    },
+    load: loadRecord,
 
     async list() {
       const index = await readIndex();
-      const records = await Promise.all(index.runIds.map((id) => this.load(id)));
+      const records = await Promise.all(index.runIds.map(loadRecord));
       return records.filter((record): record is AgentRunRecord => record !== undefined);
     },
   };
