@@ -301,7 +301,21 @@ function formatBackgroundTime(value) {
 }
 
 function backgroundStateBadge(state) {
-  return state === 'succeeded' ? '✓' : state === 'failed' ? '!' : state === 'running' || state === 'starting' ? '●' : state === 'cancelled' ? '⊘' : '○';
+  return state === 'succeeded' || state === 'completed' ? '✓'
+    : state === 'failed' ? '!'
+      : state === 'running' || state === 'starting' || state === 'enabled' ? '●'
+        : state === 'cancelled' || state === 'disabled' ? '⊘'
+          : '○';
+}
+
+function automationScheduleLabel(automation) {
+  if (automation.cronExpression) return `${automation.cronExpression} · ${automation.timeZone}`;
+  if (!automation.repeatEveryMs) return 'Recurring';
+  const hours = automation.repeatEveryMs / 3_600_000;
+  if (Number.isInteger(hours) && hours >= 1) return `Every ${hours}h`;
+  const minutes = automation.repeatEveryMs / 60_000;
+  if (Number.isInteger(minutes) && minutes >= 1) return `Every ${minutes}m`;
+  return `Every ${Math.round(automation.repeatEveryMs / 1000)}s`;
 }
 
 async function openJobOutput(job) {
@@ -320,6 +334,7 @@ async function openJobOutput(job) {
 function renderBackground(data) {
   const schedules = data?.schedules ?? [];
   const jobs = data?.jobs ?? [];
+  const agentAutomations = data?.agentAutomations ?? [];
   const agentRuns = data?.agentRuns ?? [];
   $('background-next').textContent = data?.nextWakeAt
     ? `Next wake · ${formatBackgroundTime(data.nextWakeAt)}`
@@ -369,6 +384,37 @@ function renderBackground(data) {
     return button;
   }));
 
+  $('background-agent-automations').replaceChildren(...agentAutomations.slice(0, 6).map((automation) => {
+    const row = element('div', 'background-row');
+    const body = element('div', 'background-row-body');
+    const name = automation.name || automation.skillName || 'Agent automation';
+    body.append(
+      element('strong', '', `${backgroundStateBadge(automation.state)} ${name}`),
+      element('small', '', [
+        automationScheduleLabel(automation),
+        automation.state,
+        `next ${formatBackgroundTime(automation.nextRunAt)}`,
+      ].join(' · ')),
+    );
+    if (automation.lastError) row.title = automation.lastError;
+    row.append(body);
+
+    const action = element('button', 'background-action', automation.state === 'enabled' ? '×' : '↻');
+    action.type = 'button';
+    action.title = automation.state === 'enabled' ? 'Disable Agent automation' : 'Enable Agent automation';
+    action.onclick = async () => {
+      try {
+        if (automation.state === 'enabled') await api.cancelAgentAutomation(automation.automationId);
+        else await api.enableAgentAutomation(automation.automationId);
+        await refreshBackground();
+      } catch (error) {
+        showError(error);
+      }
+    };
+    row.append(action);
+    return row;
+  }));
+
   $('background-agent-runs').replaceChildren(...agentRuns.slice(0, 6).map((run) => {
     const row = element('div', 'background-row');
     const body = element('div', 'background-row-body');
@@ -386,6 +432,7 @@ function renderBackground(data) {
 
   if (!schedules.length) $('background-schedules').replaceChildren();
   if (!jobs.length) $('background-jobs').replaceChildren();
+  if (!agentAutomations.length) $('background-agent-automations').replaceChildren();
   if (!agentRuns.length) $('background-agent-runs').replaceChildren();
 }
 
