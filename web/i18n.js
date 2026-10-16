@@ -120,6 +120,7 @@ const chinese = {
   'Your task plan will appear here.': '任务计划会显示在这里。',
   'Activity': '活动',
   'Agent runs': 'Agent 运行',
+  'Agent automations': 'Agent 自动任务',
   'Tool calls and progress,': '工具调用与进度，',
   'as they happen.': '实时呈现。',
   'Memory': '记忆',
