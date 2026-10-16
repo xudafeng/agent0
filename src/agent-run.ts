@@ -41,6 +41,12 @@ export interface HeadlessAgentRunResult {
   steps: number;
 }
 
+const headlessAlwaysDenied = new Set([
+  'schedule_agent_run',
+  'agent_automation_cancel',
+  'agent_automation_enable',
+]);
+
 const readOnlyDenied = new Set([
   'computer_exec',
   'computer_write_file',
@@ -65,15 +71,15 @@ const readOnlyDenied = new Set([
   'autonomy_request_handoff',
   'autonomy_evaluate',
   'artifact_create',
-  'schedule_agent_run',
-  'agent_automation_cancel',
-  'agent_automation_enable',
 ]);
 
 export function createHeadlessToolPolicy(policy: HeadlessPolicy): ToolExecutionPolicy {
   return (toolCall) => {
     if (toolCall.name.startsWith('mcp_')) {
       return { action: 'deny', reason: 'MCP tools are disabled in non-interactive headless runs.' };
+    }
+    if (headlessAlwaysDenied.has(toolCall.name)) {
+      return { action: 'deny', reason: 'Scheduled Agent automation changes require an interactive approval or explicit CLI action.' };
     }
     if (policy === 'read-only' && readOnlyDenied.has(toolCall.name)) {
       return { action: 'deny', reason: `Tool is not allowed by the read-only headless policy: ${toolCall.name}` };
