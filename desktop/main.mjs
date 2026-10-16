@@ -17,6 +17,7 @@ import { createDurableScheduler } from '../dist/scheduler.js';
 import { listDurableJobs, readDurableJobOutput } from '../dist/job.js';
 import { createFilePersonalStateStore } from '../dist/personal-state.js';
 import { createFileAgentRunStore } from '../dist/agent-run-store.js';
+import { createFileAgentAutomationStore } from '../dist/agent-automation.js';
 import { createFileMissionStore } from '../dist/autonomy.js';
 import { createFileArtifactStore } from '../dist/artifact.js';
 
@@ -37,6 +38,7 @@ let personalStateStore;
 let missionStore;
 let artifactStore;
 let agentRunStore;
+let agentAutomationStore;
 let sessionStore;
 let workspaceStore;
 let computerBackend;
@@ -162,12 +164,13 @@ async function getRuntime() {
       personalStateStore,
       missionStore,
       artifactStore,
+      agentAutomationStore,
       toolPolicy: (toolCall) => {
         if (toolCall.name.startsWith('mcp_')) {
           return { action: 'ask', reason: 'MCP tool requires approval before execution.' };
         }
-        if (toolCall.name === 'computer_exec' || toolCall.name === 'computer_write_file' || toolCall.name === 'computer_start_process' || toolCall.name === 'job_start' || toolCall.name === 'schedule_create' || toolCall.name === 'schedule_create_cron' || toolCall.name === 'schedule_cancel' || toolCall.name === 'memory_remember' || toolCall.name === 'memory_update' || toolCall.name === 'memory_forget' || (toolCall.name.startsWith('personal_') && toolCall.name !== 'personal_state') || ['autonomy_create_mission', 'autonomy_update_task', 'autonomy_delegate_parallel', 'artifact_create', 'autonomy_request_handoff', 'autonomy_evaluate'].includes(toolCall.name)) {
-          return { action: 'ask', reason: toolCall.name.startsWith('memory_') ? 'Persistent memory changes require approval before execution.' : toolCall.name.startsWith('personal_') ? 'Personal agent state changes require approval before execution.' : toolCall.name.startsWith('autonomy_') || toolCall.name === 'artifact_create' ? 'Autonomous mission changes require approval before execution.' : 'Computer command, file change, background job, or schedule change requires approval before execution.' };
+        if (toolCall.name === 'computer_exec' || toolCall.name === 'computer_write_file' || toolCall.name === 'computer_start_process' || toolCall.name === 'job_start' || toolCall.name === 'schedule_create' || toolCall.name === 'schedule_create_cron' || toolCall.name === 'schedule_cancel' || toolCall.name === 'schedule_agent_run' || toolCall.name === 'agent_automation_cancel' || toolCall.name === 'agent_automation_enable' || toolCall.name === 'memory_remember' || toolCall.name === 'memory_update' || toolCall.name === 'memory_forget' || (toolCall.name.startsWith('personal_') && toolCall.name !== 'personal_state') || ['autonomy_create_mission', 'autonomy_update_task', 'autonomy_delegate_parallel', 'artifact_create', 'autonomy_request_handoff', 'autonomy_evaluate'].includes(toolCall.name)) {
+          return { action: 'ask', reason: toolCall.name.startsWith('memory_') ? 'Persistent memory changes require approval before execution.' : toolCall.name.startsWith('personal_') ? 'Personal agent state changes require approval before execution.' : toolCall.name.startsWith('autonomy_') || toolCall.name === 'artifact_create' ? 'Autonomous mission changes require approval before execution.' : toolCall.name === 'schedule_agent_run' || toolCall.name.startsWith('agent_automation_') ? 'Scheduled Agent automation changes require approval before execution.' : 'Computer command, file change, background job, or schedule change requires approval before execution.' };
         }
         return { action: 'allow' };
       },
@@ -293,6 +296,13 @@ async function withBackgroundComputer(action) {
 }
 
 async function backgroundState() {
+  const agentAutomations = await agentAutomationStore.list();
+  const agentRuns = (await agentRunStore.list()).slice(0, 8);
+  const automationNextWakeAt = agentAutomations
+    .filter((automation) => automation.state === 'enabled')
+    .map((automation) => automation.nextRunAt)
+    .sort()[0];
+
   const result = await withBackgroundComputer(async (activeComputer) => {
     const scheduler = await createDurableScheduler(activeComputer, { armTimers: false });
     try {
@@ -303,19 +313,29 @@ async function backgroundState() {
         nextWakeAt: scheduler.nextWakeAt(),
         schedules,
         jobs,
-        agentRuns: (await agentRunStore.list()).slice(0, 8),
+        agentAutomations,
+        agentRuns,
       };
     } finally {
       await scheduler.close();
     }
   });
 
-  return result ?? {
-    configured: Boolean(computerBackend),
-    nextWakeAt: undefined,
+  if (result) {
+    const nextWakeAt = [result.nextWakeAt, automationNextWakeAt].filter(Boolean).sort()[0];
+    return {
+      ...result,
+      ...(nextWakeAt === undefined ? {} : { nextWakeAt }),
+    };
+  }
+
+  return {
+    configured: Boolean(computerBackend) || agentAutomations.length > 0,
+    ...(automationNextWakeAt === undefined ? {} : { nextWakeAt: automationNextWakeAt }),
     schedules: [],
     jobs: [],
-    agentRuns: (await agentRunStore.list()).slice(0, 8),
+    agentAutomations,
+    agentRuns,
   };
 }
 
@@ -333,6 +353,14 @@ handle('background-cancel-schedule', async (scheduleId) => {
   });
   if (!cancelled) throw new Error('No computer is bound to this conversation.');
   return cancelled;
+});
+handle('background-cancel-agent-automation', async (automationId) => {
+  if (typeof automationId !== 'string') throw new Error('Invalid Agent automation ID.');
+  return agentAutomationStore.cancel(automationId);
+});
+handle('background-enable-agent-automation', async (automationId) => {
+  if (typeof automationId !== 'string') throw new Error('Invalid Agent automation ID.');
+  return agentAutomationStore.enable(automationId);
 });
 handle('background-job-output', async (jobId) => {
   if (typeof jobId !== 'string') throw new Error('Invalid job ID.');
@@ -618,6 +646,7 @@ app.whenReady().then(async () => {
   missionStore = createFileMissionStore();
   artifactStore = createFileArtifactStore();
   agentRunStore = createFileAgentRunStore();
+  agentAutomationStore = createFileAgentAutomationStore();
   savedMemory = await memoryStore.render();
   sessionStore = createFileSessionStore();
   workspaceStore = createFileWorkspaceStore();
