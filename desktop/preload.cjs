@@ -15,6 +15,8 @@ contextBridge.exposeInMainWorld('agent0', {
   personalJournal: (content) => ipcRenderer.invoke('agent:personal-journal', content),
   backgroundState: () => ipcRenderer.invoke('agent:background-state'),
   cancelSchedule: (scheduleId) => ipcRenderer.invoke('agent:background-cancel-schedule', scheduleId),
+  cancelAgentAutomation: (automationId) => ipcRenderer.invoke('agent:background-cancel-agent-automation', automationId),
+  enableAgentAutomation: (automationId) => ipcRenderer.invoke('agent:background-enable-agent-automation', automationId),
   jobOutput: (jobId) => ipcRenderer.invoke('agent:background-job-output', jobId),
   createSession: (title) => ipcRenderer.invoke('agent:session-create', title),
   switchSession: (id) => ipcRenderer.invoke('agent:session-switch', id),

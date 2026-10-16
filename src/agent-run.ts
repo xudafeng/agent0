@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path';
 import type { AgentEvent, AgentEventHandler } from './events.js';
 import { createFileAgentRunStore, type AgentRunRecord, type AgentRunTrigger } from './agent-run-store.js';
 import { createFileArtifactStore } from './artifact.js';
+import { createFileAgentAutomationStore } from './agent-automation.js';
 import { createFileMissionStore } from './autonomy.js';
 import type { ExaClient } from './exa.js';
 import { createFileToolExecutionLedger } from './execution-ledger.js';
@@ -29,6 +30,7 @@ export interface HeadlessAgentRunOptions {
   resumeAgentRunId?: string;
   signal?: AbortSignal;
   onEvent?: AgentEventHandler;
+  onAgentRunCreated?: (record: AgentRunRecord) => Promise<void> | void;
   provider?: Provider;
   exaClient?: ExaClient | null;
 }
@@ -38,6 +40,12 @@ export interface HeadlessAgentRunResult {
   text: string;
   steps: number;
 }
+
+const headlessAlwaysDenied = new Set([
+  'schedule_agent_run',
+  'agent_automation_cancel',
+  'agent_automation_enable',
+]);
 
 const readOnlyDenied = new Set([
   'computer_exec',
@@ -69,6 +77,9 @@ export function createHeadlessToolPolicy(policy: HeadlessPolicy): ToolExecutionP
   return (toolCall) => {
     if (toolCall.name.startsWith('mcp_')) {
       return { action: 'deny', reason: 'MCP tools are disabled in non-interactive headless runs.' };
+    }
+    if (headlessAlwaysDenied.has(toolCall.name)) {
+      return { action: 'deny', reason: 'Scheduled Agent automation changes require an interactive approval or explicit CLI action.' };
     }
     if (policy === 'read-only' && readOnlyDenied.has(toolCall.name)) {
       return { action: 'deny', reason: `Tool is not allowed by the read-only headless policy: ${toolCall.name}` };
@@ -104,6 +115,7 @@ export async function runHeadlessAgent(options: HeadlessAgentRunOptions): Promis
   const personalStateStore = createFilePersonalStateStore(join(dataDir, 'personal'));
   const missionStore = createFileMissionStore(join(dataDir, 'autonomy'));
   const artifactStore = createFileArtifactStore(join(dataDir, 'artifacts'));
+  const agentAutomationStore = createFileAgentAutomationStore(join(dataDir, 'agent-automations'));
   const tracePath = join(dataDir, 'traces.ndjson');
 
   let record: AgentRunRecord;
@@ -155,6 +167,7 @@ export async function runHeadlessAgent(options: HeadlessAgentRunOptions): Promis
       skillRoots,
       policy,
     });
+    await options.onAgentRunCreated?.(structuredClone(record));
   }
 
   const snapshot = await sessionStore.load(sessionId);
@@ -170,6 +183,7 @@ export async function runHeadlessAgent(options: HeadlessAgentRunOptions): Promis
     personalStateStore,
     missionStore,
     artifactStore,
+    agentAutomationStore,
     runStore: runtimeRuns,
     executionLedger,
     tracePath,

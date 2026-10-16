@@ -392,3 +392,107 @@ pnpm agent-run -- --resume-agent-run <agentRunId>
 
 The run resumes from the last durable runtime checkpoint instead of restarting the original prompt.
 
+## Scheduled Agent automations
+
+Agent0 can schedule complete headless Agent workflows, not only shell commands.
+
+A scheduled Agent automation persists:
+
+- prompt
+- trusted working directory
+- skill and standalone skill roots
+- non-interactive policy
+- interval or cron recurrence
+- next run time
+- last/running AgentRun
+- run count
+- last error
+
+### Run radar every 12 hours
+
+After configuring the same Agent0 profile with model credentials and `EXA_API_KEY`, create the automation:
+
+```bash
+pnpm agent-automation -- create \
+  --name radar \
+  --cwd /path/to/xdf-radar-skills \
+  --skill radar \
+  --every 12h \
+  --policy trusted-workspace \
+  --prompt "用 radar 做一版今天的 AI 行业趋势扫描"
+```
+
+Because the skill name and working directory are provided together, the radar repository itself is used as the standalone skill root.
+
+Inspect or control the automation:
+
+```bash
+pnpm agent-automation -- list
+pnpm agent-automation -- status <automationId>
+pnpm agent-automation -- cancel <automationId>
+pnpm agent-automation -- enable <automationId>
+```
+
+Cron schedules are also supported:
+
+```bash
+pnpm agent-automation -- create \
+  --name radar \
+  --cwd /path/to/xdf-radar-skills \
+  --skill radar \
+  --cron "0 */12 * * *" \
+  --timezone Asia/Shanghai \
+  --policy trusted-workspace \
+  --prompt "用 radar 做一版今天的 AI 行业趋势扫描"
+```
+
+### Worker
+
+Run a long-lived worker:
+
+```bash
+pnpm agent-worker
+```
+
+The worker executes both:
+
+- profile-level scheduled Agent automations
+- existing session-bound durable shell schedules
+
+It wakes at least once per minute so newly created earlier schedules are discovered, while using the persisted `nextRunAt` values for actual due checks.
+
+For an always-on Mac mini, run this process under a supervisor such as `launchd` or another process manager. The supervisor keeps the worker alive across process exits or machine restarts; recurrence semantics remain owned by Agent0.
+
+Use the same `AGENT0_PROFILE_DIR` for the desktop app, CLI, worker, and one-shot wake command when the profile is not the repository root.
+
+A one-shot wake remains available:
+
+```bash
+pnpm wake
+```
+
+### Catch-up and overlap semantics
+
+Scheduled Agent automations use **catch up once** semantics.
+
+If the machine sleeps through several intervals, the next wake launches at most one missed AgentRun. The next recurrence is then calculated from the wake time rather than replaying every missed interval.
+
+Before a run starts, Agent0:
+
+1. acquires an exclusive per-automation claim file;
+2. checks whether a prior `runningAgentRunId` is still running;
+3. advances `nextRunAt`;
+4. creates a scheduled Headless AgentRun.
+
+This prevents two normal workers from starting the same automation concurrently.
+
+A hard process crash can intentionally leave a claim/running marker behind rather than risking duplicate side effects. Automated stale-run recovery belongs to the later automation-hardening layer.
+
+### Security boundary
+
+`trusted-workspace` allows the scheduled AgentRun to execute commands and write inside the configured working directory.
+
+It does **not** allow a headless Agent to create, cancel, or enable Agent automations. Schedule mutation always requires an explicit CLI action or an interactive desktop approval.
+
+MCP tools remain disabled in non-interactive headless runs.
+
