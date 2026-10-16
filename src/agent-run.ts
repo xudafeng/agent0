@@ -29,6 +29,7 @@ export interface HeadlessAgentRunOptions {
   resumeAgentRunId?: string;
   signal?: AbortSignal;
   onEvent?: AgentEventHandler;
+  onAgentRunCreated?: (record: AgentRunRecord) => Promise<void> | void;
   provider?: Provider;
   exaClient?: ExaClient | null;
 }
@@ -155,6 +156,7 @@ export async function runHeadlessAgent(options: HeadlessAgentRunOptions): Promis
       skillRoots,
       policy,
     });
+    await options.onAgentRunCreated?.(structuredClone(record));
   }
 
   const snapshot = await sessionStore.load(sessionId);
