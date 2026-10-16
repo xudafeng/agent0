@@ -16,7 +16,9 @@
     "package": "pnpm build && electron-builder --mac dir",
     "test:desktop": "pnpm build && electron tests/desktop-smoke.mjs",
     "wake": "tsx src/wake.ts",
-    "agent-run": "tsx src/agent-run-cli.ts"
+    "agent-run": "tsx src/agent-run-cli.ts",
+    "agent-automation": "tsx src/agent-automation-cli.ts",
+    "agent-worker": "tsx src/agent-worker.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/client": "^2.0.0",
