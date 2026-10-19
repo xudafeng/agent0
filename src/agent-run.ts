@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path';
 import type { AgentEvent, AgentEventHandler } from './events.js';
 import { createFileAgentRunStore, type AgentRunRecord, type AgentRunTrigger } from './agent-run-store.js';
 import { createFileArtifactStore } from './artifact.js';
+import { createFileAgentAutomationStore } from './agent-automation.js';
 import { createFileMissionStore } from './autonomy.js';
 import type { ExaClient } from './exa.js';
 import { createFileToolExecutionLedger } from './execution-ledger.js';
@@ -64,6 +65,9 @@ const readOnlyDenied = new Set([
   'autonomy_request_handoff',
   'autonomy_evaluate',
   'artifact_create',
+  'schedule_agent_run',
+  'agent_automation_cancel',
+  'agent_automation_enable',
 ]);
 
 export function createHeadlessToolPolicy(policy: HeadlessPolicy): ToolExecutionPolicy {
@@ -105,6 +109,7 @@ export async function runHeadlessAgent(options: HeadlessAgentRunOptions): Promis
   const personalStateStore = createFilePersonalStateStore(join(dataDir, 'personal'));
   const missionStore = createFileMissionStore(join(dataDir, 'autonomy'));
   const artifactStore = createFileArtifactStore(join(dataDir, 'artifacts'));
+  const agentAutomationStore = createFileAgentAutomationStore(join(dataDir, 'agent-automations'));
   const tracePath = join(dataDir, 'traces.ndjson');
 
   let record: AgentRunRecord;
@@ -172,6 +177,7 @@ export async function runHeadlessAgent(options: HeadlessAgentRunOptions): Promis
     personalStateStore,
     missionStore,
     artifactStore,
+    agentAutomationStore,
     runStore: runtimeRuns,
     executionLedger,
     tracePath,
