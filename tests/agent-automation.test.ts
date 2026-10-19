@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -27,6 +27,8 @@ test('Agent automation store persists 12-hour interval schedules', async () => {
   assert.equal(automation.state, 'enabled');
   assert.equal(automation.nextRunAt, '2026-10-10T12:00:00.000Z');
   assert.equal(automation.runCount, 0);
+  assert.equal(automation.maxRunMs, 6 * 60 * 60 * 1000);
+  assert.equal(automation.consecutiveFailures, 0);
 
   const disabled = await store.cancel(automation.automationId);
   assert.equal(disabled.state, 'disabled');
@@ -100,4 +102,28 @@ test('Agent automation claim lock prevents concurrent workers', async () => {
   const releaseAgain = await store.claim(automation.automationId);
   assert.ok(releaseAgain);
   await releaseAgain!();
+});
+
+
+test('Agent automation reclaims a lock owned by a dead process', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'agent0-automation-'));
+  const store = createFileAgentAutomationStore(root);
+  const automation = await store.create({
+    prompt: 'Run.',
+    cwd: '/tmp/project',
+    repeatEveryMs: 1000,
+    now: new Date('2026-10-10T00:00:00.000Z'),
+  });
+
+  const lockDir = join(root, 'locks');
+  await mkdir(lockDir, { recursive: true });
+  await writeFile(join(lockDir, `${automation.automationId}.lock`), JSON.stringify({
+    automationId: automation.automationId,
+    pid: 2147483647,
+    claimedAt: '2026-10-10T00:00:00.000Z',
+  }), 'utf8');
+
+  const release = await store.claim(automation.automationId);
+  assert.ok(release);
+  await release!();
 });
