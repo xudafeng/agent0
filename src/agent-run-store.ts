@@ -17,6 +17,8 @@ export interface AgentRunRecord {
   skillRoots: string[];
   policy: 'read-only' | 'trusted-workspace';
   runtimeRunId?: string;
+  ownerPid?: number;
+  heartbeatAt?: string;
   result?: string;
   error?: string;
   createdAt: string;

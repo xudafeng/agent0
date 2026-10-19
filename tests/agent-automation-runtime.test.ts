@@ -112,7 +112,10 @@ test('failed scheduled AgentRun records the error and waits for the next interva
   const updated = await store.get(automation.automationId);
   assert.equal(updated.runCount, 1);
   assert.equal(updated.runningAgentRunId, undefined);
-  assert.equal(updated.nextRunAt, '2026-10-10T03:00:00.000Z');
+  assert.equal(updated.consecutiveFailures, 1);
+  assert.ok(updated.backoffUntil);
+  assert.ok(new Date(updated.nextRunAt).getTime() >= new Date('2026-10-10T03:00:00.000Z').getTime());
+  assert.ok(new Date(updated.nextRunAt).getTime() >= new Date(updated.backoffUntil!).getTime());
   assert.match(updated.lastError ?? '', /network unavailable/);
 });
 
@@ -191,4 +194,141 @@ test('wake skips when a previous AgentRun is still marked running', async () => 
   assert.equal(wake.automations[0]?.status, 'skipped');
   assert.equal(wake.automations[0]?.agentRunId, running.agentRunId);
   assert.match(wake.automations[0]?.reason ?? '', /still running/);
+});
+
+
+test('wake resumes a stale running AgentRun before the next scheduled period', async () => {
+  const profile = await mkdtemp(join(tmpdir(), 'agent0-profile-'));
+  const store = createFileAgentAutomationStore(join(profile, 'data', 'agent-automations'));
+  const automation = await store.create({
+    prompt: 'Run radar.',
+    cwd: '/tmp/radar',
+    repeatEveryMs: 12 * 60 * 60 * 1000,
+    now: new Date('2026-10-10T00:00:00.000Z'),
+  });
+
+  const agentRuns = createFileAgentRunStore(join(profile, 'data', 'agent-runs'));
+  const running = await agentRuns.create({
+    trigger: 'scheduled',
+    status: 'running',
+    prompt: 'Run radar.',
+    sessionId: 'session-stale',
+    cwd: '/tmp/radar',
+    skillRoots: [],
+    policy: 'trusted-workspace',
+    runtimeRunId: 'runtime-stale',
+    ownerPid: 2147483647,
+    heartbeatAt: '2026-10-10T00:05:00.000Z',
+  });
+
+  const changed = await store.get(automation.automationId);
+  changed.runningAgentRunId = running.agentRunId;
+  changed.lastAgentRunId = running.agentRunId;
+  changed.runCount = 1;
+  await store.save(changed);
+
+  let resumeId: string | undefined;
+  const wake = await runAgentAutomationWake(
+    profile,
+    new Date('2026-10-10T01:00:00.000Z'),
+    {
+      store,
+      execute: async (options) => {
+        resumeId = options.resumeAgentRunId;
+        return {
+          record: {
+            ...running,
+            status: 'completed',
+            result: 'resumed',
+            completedAt: '2026-10-10T01:01:00.000Z',
+            updatedAt: '2026-10-10T01:01:00.000Z',
+          },
+          text: 'resumed',
+          steps: 2,
+        };
+      },
+    },
+  );
+
+  assert.equal(resumeId, running.agentRunId);
+  assert.equal(wake.automations[0]?.status, 'completed');
+  const updated = await store.get(automation.automationId);
+  assert.equal(updated.runningAgentRunId, undefined);
+  assert.equal(updated.runCount, 1);
+});
+
+test('wake does not resume a running AgentRun whose owner process is alive', async () => {
+  const profile = await mkdtemp(join(tmpdir(), 'agent0-profile-'));
+  const store = createFileAgentAutomationStore(join(profile, 'data', 'agent-automations'));
+  const automation = await store.create({
+    prompt: 'Run.',
+    cwd: '/tmp/project',
+    repeatEveryMs: 1000,
+    now: new Date('2026-10-10T00:00:00.000Z'),
+  });
+
+  const agentRuns = createFileAgentRunStore(join(profile, 'data', 'agent-runs'));
+  const running = await agentRuns.create({
+    trigger: 'scheduled',
+    status: 'running',
+    prompt: 'Run.',
+    sessionId: 'session-live',
+    cwd: '/tmp/project',
+    skillRoots: [],
+    policy: 'trusted-workspace',
+    runtimeRunId: 'runtime-live',
+    ownerPid: process.pid,
+    heartbeatAt: new Date().toISOString(),
+  });
+
+  const changed = await store.get(automation.automationId);
+  changed.runningAgentRunId = running.agentRunId;
+  changed.lastAgentRunId = running.agentRunId;
+  await store.save(changed);
+
+  let called = false;
+  const wake = await runAgentAutomationWake(
+    profile,
+    new Date('2026-10-10T00:00:02.000Z'),
+    {
+      store,
+      execute: async () => {
+        called = true;
+        throw new Error('must not execute');
+      },
+    },
+  );
+
+  assert.equal(called, false);
+  assert.match(wake.automations[0]?.reason ?? '', /still running/);
+});
+
+test('automation timeout aborts the run and applies failure backoff', async () => {
+  const profile = await mkdtemp(join(tmpdir(), 'agent0-profile-'));
+  const store = createFileAgentAutomationStore(join(profile, 'data', 'agent-automations'));
+  const automation = await store.create({
+    prompt: 'Run.',
+    cwd: '/tmp/project',
+    repeatEveryMs: 1000,
+    maxRunMs: 20,
+    now: new Date(Date.now() - 10_000),
+  });
+
+  const wake = await runAgentAutomationWake(profile, new Date(), {
+    store,
+    execute: async (options) => {
+      await new Promise<void>((_resolve, reject) => {
+        options.signal?.addEventListener('abort', () => reject(options.signal?.reason), { once: true });
+      });
+      throw new Error('unreachable');
+    },
+  });
+
+  assert.equal(wake.automations[0]?.status, 'failed');
+  assert.match(wake.automations[0]?.error ?? '', /timed out/);
+
+  const updated = await store.get(automation.automationId);
+  assert.equal(updated.consecutiveFailures, 1);
+  assert.ok(updated.backoffUntil);
+  assert.ok(new Date(updated.nextRunAt).getTime() >= new Date(updated.backoffUntil!).getTime());
 });

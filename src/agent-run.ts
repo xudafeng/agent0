@@ -126,7 +126,7 @@ export async function runHeadlessAgent(options: HeadlessAgentRunOptions): Promis
   let skillRoots: string[];
   let policy: HeadlessPolicy;
   let resumeRuntimeRunId: string | undefined;
-  let history: SessionHistoryMessage[] = [];
+  let createdNew = false;
 
   if (options.resumeAgentRunId) {
     const existing = await agentRuns.load(options.resumeAgentRunId);
@@ -135,7 +135,12 @@ export async function runHeadlessAgent(options: HeadlessAgentRunOptions): Promis
       throw new Error(`Agent run is not resumable: ${existing.status}`);
     }
     if (!existing.runtimeRunId) throw new Error('Agent run is missing its runtime run ID.');
-    record = existing;
+    record = {
+      ...existing,
+      ownerPid: process.pid,
+      heartbeatAt: new Date().toISOString(),
+    };
+    await agentRuns.save(record);
     prompt = existing.prompt;
     sessionId = existing.sessionId;
     cwd = existing.cwd;
@@ -157,6 +162,7 @@ export async function runHeadlessAgent(options: HeadlessAgentRunOptions): Promis
     skillName = options.skillName?.trim() || undefined;
     skillRoots = (options.skillRoots ?? []).map((root) => resolve(root));
     policy = options.policy ?? 'read-only';
+    const startedAt = new Date().toISOString();
     record = await agentRuns.create({
       trigger: options.trigger ?? 'manual',
       status: 'running',
@@ -166,32 +172,40 @@ export async function runHeadlessAgent(options: HeadlessAgentRunOptions): Promis
       ...(skillName === undefined ? {} : { skillName }),
       skillRoots,
       policy,
+      ownerPid: process.pid,
+      heartbeatAt: startedAt,
     });
-    await options.onAgentRunCreated?.(structuredClone(record));
+    createdNew = true;
   }
 
-  const snapshot = await sessionStore.load(sessionId);
-  history = snapshot ? structuredClone(snapshot.history) : [];
-
-  const computer = cwd ? await createLocalDirectoryComputer(cwd) : undefined;
-  const runtime = await createAgentRuntime({
-    ...(options.provider === undefined ? {} : { provider: options.provider }),
-    ...(options.exaClient === undefined ? {} : { exaClient: options.exaClient }),
-    ...(computer === undefined ? {} : { computer }),
-    enableScheduler: false,
-    memoryStore,
-    personalStateStore,
-    missionStore,
-    artifactStore,
-    agentAutomationStore,
-    runStore: runtimeRuns,
-    executionLedger,
-    tracePath,
-    skillRoots,
-    toolPolicy: createHeadlessToolPolicy(policy),
-  });
+  let computer: Awaited<ReturnType<typeof createLocalDirectoryComputer>> | undefined;
+  let runtime: Awaited<ReturnType<typeof createAgentRuntime>> | undefined;
 
   try {
+    if (createdNew) {
+      await options.onAgentRunCreated?.(structuredClone(record));
+    }
+
+    const snapshot = await sessionStore.load(sessionId);
+    const history: SessionHistoryMessage[] = snapshot ? structuredClone(snapshot.history) : [];
+    computer = cwd ? await createLocalDirectoryComputer(cwd) : undefined;
+    runtime = await createAgentRuntime({
+      ...(options.provider === undefined ? {} : { provider: options.provider }),
+      ...(options.exaClient === undefined ? {} : { exaClient: options.exaClient }),
+      ...(computer === undefined ? {} : { computer }),
+      enableScheduler: false,
+      memoryStore,
+      personalStateStore,
+      missionStore,
+      artifactStore,
+      agentAutomationStore,
+      runStore: runtimeRuns,
+      executionLedger,
+      tracePath,
+      skillRoots,
+      toolPolicy: createHeadlessToolPolicy(policy),
+    });
+
     if (!resumeRuntimeRunId) {
       const prior = snapshot?.runtime ?? { messages: [], skills: [] };
       await runtime.restoreSession({
@@ -202,8 +216,17 @@ export async function runHeadlessAgent(options: HeadlessAgentRunOptions): Promis
     }
 
     const onEvent = async (event: AgentEvent) => {
-      if (!record.runtimeRunId && event.type === 'run_start') {
-        record = { ...record, runtimeRunId: event.runId };
+      const heartbeat =
+        event.type === 'run_start' ||
+        event.type === 'run_resumed' ||
+        event.type === 'turn_end';
+      if ((!record.runtimeRunId && event.type === 'run_start') || heartbeat) {
+        record = {
+          ...record,
+          ...(record.runtimeRunId || event.type !== 'run_start' ? {} : { runtimeRunId: event.runId }),
+          heartbeatAt: new Date().toISOString(),
+          ownerPid: process.pid,
+        };
         await agentRuns.save(record);
       }
       await options.onEvent?.(event);
@@ -236,7 +259,9 @@ export async function runHeadlessAgent(options: HeadlessAgentRunOptions): Promis
       result: result.text,
       completedAt: now,
       updatedAt: now,
+      heartbeatAt: now,
     };
+    delete record.ownerPid;
     delete record.error;
     await agentRuns.save(record);
     return { record, text: result.text, steps: result.steps };
@@ -249,11 +274,13 @@ export async function runHeadlessAgent(options: HeadlessAgentRunOptions): Promis
       error: error instanceof Error ? error.message : String(error),
       completedAt: now,
       updatedAt: now,
+      heartbeatAt: now,
     };
+    delete record.ownerPid;
     await agentRuns.save(record);
     throw error;
   } finally {
-    await runtime.close();
+    await runtime?.close();
     await computer?.destroy();
   }
 }

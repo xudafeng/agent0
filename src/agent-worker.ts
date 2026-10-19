@@ -22,11 +22,13 @@ function delayUntil(nextWakeAt: string | undefined): number {
 async function sleep(ms: number, signal: AbortSignal): Promise<void> {
   signal.throwIfAborted();
   await new Promise<void>((resolveSleep, rejectSleep) => {
-    const timer = setTimeout(resolveSleep, ms);
-    const abort = () => {
+    const finish = (action: () => void) => {
+      signal.removeEventListener('abort', abort);
       clearTimeout(timer);
-      rejectSleep(signal.reason);
+      action();
     };
+    const timer = setTimeout(() => finish(resolveSleep), ms);
+    const abort = () => finish(() => rejectSleep(signal.reason));
     signal.addEventListener('abort', abort, { once: true });
   });
 }
