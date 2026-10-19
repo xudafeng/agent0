@@ -269,3 +269,29 @@ test('a crashed running AgentRun can resume from its runtime checkpoint', async 
     'resumed result',
   ]);
 });
+
+
+test('headless setup failure does not leave an AgentRun stuck running', async () => {
+  const profile = await mkdtemp(join(tmpdir(), 'agent0-profile-'));
+  const missingProject = join(profile, 'missing-project');
+  const provider: Provider = {
+    async generate() {
+      throw new Error('must not reach provider');
+    },
+  };
+
+  await assert.rejects(
+    runHeadlessAgent({
+      profileDir: profile,
+      cwd: missingProject,
+      prompt: 'Run.',
+      provider,
+      exaClient: null,
+    }),
+  );
+
+  const runs = await createFileAgentRunStore(join(profile, 'data', 'agent-runs')).list();
+  assert.equal(runs.length, 1);
+  assert.equal(runs[0]?.status, 'failed');
+  assert.equal(runs[0]?.ownerPid, undefined);
+});
