@@ -1,6 +1,7 @@
 import { join, resolve } from 'node:path';
 import {
   createFileAgentAutomationStore,
+  isProcessAlive,
   nextAgentAutomationRunAt,
   type AgentAutomation,
   type AgentAutomationStore,
@@ -32,6 +33,24 @@ export interface AgentAutomationWakeOptions {
   execute?: (options: HeadlessAgentRunOptions) => Promise<HeadlessAgentRunResult>;
 }
 
+const FAILURE_BACKOFF_BASE_MS = 5 * 60 * 1000;
+const FAILURE_BACKOFF_MAX_MS = 6 * 60 * 60 * 1000;
+
+export class AgentAutomationTimeoutError extends Error {
+  constructor(
+    public readonly automationId: string,
+    public readonly timeoutMs: number,
+  ) {
+    super(`Agent automation timed out after ${timeoutMs} ms: ${automationId}`);
+    this.name = 'AgentAutomationTimeoutError';
+  }
+}
+
+function failureBackoffMs(consecutiveFailures: number): number {
+  const exponent = Math.max(0, Math.min(consecutiveFailures - 1, 10));
+  return Math.min(FAILURE_BACKOFF_BASE_MS * (2 ** exponent), FAILURE_BACKOFF_MAX_MS);
+}
+
 function due(automation: AgentAutomation, now: Date): boolean {
   return automation.state === 'enabled' &&
     new Date(automation.nextRunAt).getTime() <= now.getTime();
@@ -58,7 +77,7 @@ export async function runAgentAutomationWake(
   const execute = options.execute ?? runHeadlessAgent;
   const current = await store.list();
   const dueAutomations = current
-    .filter((automation) => due(automation, wakeDate))
+    .filter((automation) => due(automation, wakeDate) || automation.runningAgentRunId !== undefined)
     .sort((a, b) => a.nextRunAt.localeCompare(b.nextRunAt));
   const results: AgentAutomationWakeItem[] = [];
 
@@ -86,51 +105,104 @@ export async function runAgentAutomationWake(
         continue;
       }
 
+      let resumeAgentRunId: string | undefined;
       if (automation.runningAgentRunId) {
         const running = await agentRuns.load(automation.runningAgentRunId);
         if (running?.status === 'running') {
-          results.push({
-            automationId: automation.automationId,
-            status: 'skipped',
-            agentRunId: running.agentRunId,
-            reason: 'previous AgentRun is still running',
-            nextRunAt: automation.nextRunAt,
-          });
-          continue;
+          if (running.ownerPid === undefined) {
+            results.push({
+              automationId: automation.automationId,
+              status: 'skipped',
+              agentRunId: running.agentRunId,
+              reason: 'previous AgentRun ownership is unknown',
+              nextRunAt: automation.nextRunAt,
+            });
+            continue;
+          }
+          if (isProcessAlive(running.ownerPid)) {
+            results.push({
+              automationId: automation.automationId,
+              status: 'skipped',
+              agentRunId: running.agentRunId,
+              reason: 'previous AgentRun is still running',
+              nextRunAt: automation.nextRunAt,
+            });
+            continue;
+          }
+          if (running.runtimeRunId) {
+            resumeAgentRunId = running.agentRunId;
+          } else {
+            const failedAt = new Date().toISOString();
+            running.status = 'failed';
+            running.error = 'Owner process exited before a resumable runtime checkpoint was recorded.';
+            running.completedAt = failedAt;
+            running.updatedAt = failedAt;
+            running.heartbeatAt = failedAt;
+            delete running.ownerPid;
+            await agentRuns.save(running);
+            delete automation.runningAgentRunId;
+            automation.lastError = running.error;
+            await store.save(automation);
+          }
+        } else {
+          delete automation.runningAgentRunId;
+          await store.save(automation);
         }
-        delete automation.runningAgentRunId;
       }
 
-      // Advance before execution so a missed interval is caught up once rather
-      // than replayed repeatedly after a long sleep or a normal failure.
-      automation.nextRunAt = nextAgentAutomationRunAt(automation, wakeDate);
-      delete automation.lastError;
-      await store.save(automation);
+      if (!resumeAgentRunId && !due(automation, wakeDate)) {
+        results.push({
+          automationId: automation.automationId,
+          status: 'skipped',
+          reason: 'stale run reconciled; automation is not currently due',
+          nextRunAt: automation.nextRunAt,
+        });
+        continue;
+      }
+
+      if (!resumeAgentRunId) {
+        // Advance before a new execution so a missed interval is caught up once
+        // rather than replayed repeatedly after a long sleep or normal failure.
+        automation.nextRunAt = nextAgentAutomationRunAt(automation, wakeDate);
+        delete automation.lastError;
+        await store.save(automation);
+      }
+
+      const timeoutMs = automation.maxRunMs ?? 6 * 60 * 60 * 1000;
+      const timeoutController = new AbortController();
+      const timeout = setTimeout(() => {
+        timeoutController.abort(new AgentAutomationTimeoutError(automation.automationId, timeoutMs));
+      }, timeoutMs);
 
       try {
         const result = await execute({
           profileDir: profile,
-          prompt: automation.prompt,
-          cwd: automation.cwd,
-          ...(automation.skillName === undefined ? {} : { skillName: automation.skillName }),
-          skillRoots: [...automation.skillRoots],
-          policy: automation.policy,
-          trigger: 'scheduled',
-          onAgentRunCreated: async (record) => {
-            const latest = await store.get(automation.automationId);
-            latest.runningAgentRunId = record.agentRunId;
-            latest.lastAgentRunId = record.agentRunId;
-            latest.lastStartedAt = new Date().toISOString();
-            latest.runCount += 1;
-            delete latest.lastError;
-            await store.save(latest);
-          },
+          ...(resumeAgentRunId === undefined ? { prompt: automation.prompt } : {}),
+          ...(resumeAgentRunId === undefined ? { cwd: automation.cwd } : {}),
+          ...(resumeAgentRunId === undefined && automation.skillName !== undefined ? { skillName: automation.skillName } : {}),
+          ...(resumeAgentRunId === undefined ? { skillRoots: [...automation.skillRoots] } : {}),
+          ...(resumeAgentRunId === undefined ? { policy: automation.policy, trigger: 'scheduled' as const } : {}),
+          ...(resumeAgentRunId === undefined ? {} : { resumeAgentRunId }),
+          signal: timeoutController.signal,
+          ...(resumeAgentRunId === undefined ? {
+            onAgentRunCreated: async (record) => {
+              const latest = await store.get(automation.automationId);
+              latest.runningAgentRunId = record.agentRunId;
+              latest.lastAgentRunId = record.agentRunId;
+              latest.lastStartedAt = new Date().toISOString();
+              latest.runCount += 1;
+              delete latest.lastError;
+              await store.save(latest);
+            },
+          } : {}),
         });
 
         automation = await store.get(automation.automationId);
         delete automation.runningAgentRunId;
         automation.lastAgentRunId = result.record.agentRunId;
         automation.lastCompletedAt = new Date().toISOString();
+        automation.consecutiveFailures = 0;
+        delete automation.backoffUntil;
         delete automation.lastError;
         await store.save(automation);
         results.push({
@@ -142,8 +214,15 @@ export async function runAgentAutomationWake(
       } catch (error) {
         automation = await store.get(automation.automationId);
         delete automation.runningAgentRunId;
-        automation.lastCompletedAt = new Date().toISOString();
+        const failedAt = new Date();
+        automation.lastCompletedAt = failedAt.toISOString();
         automation.lastError = error instanceof Error ? error.message : String(error);
+        automation.consecutiveFailures = (automation.consecutiveFailures ?? 0) + 1;
+        const backoffUntil = new Date(
+          failedAt.getTime() + failureBackoffMs(automation.consecutiveFailures),
+        ).toISOString();
+        automation.backoffUntil = backoffUntil;
+        if (backoffUntil > automation.nextRunAt) automation.nextRunAt = backoffUntil;
         await store.save(automation);
         results.push({
           automationId: automation.automationId,
@@ -152,6 +231,8 @@ export async function runAgentAutomationWake(
           error: automation.lastError,
           nextRunAt: automation.nextRunAt,
         });
+      } finally {
+        clearTimeout(timeout);
       }
     } finally {
       await release();
