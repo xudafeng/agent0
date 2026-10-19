@@ -315,6 +315,8 @@ export function createFileAgentAutomationStore(root = 'data/agent-automations'):
       const automation = await load(automationId);
       automation.state = 'enabled';
       automation.nextRunAt = nextAgentAutomationRunAt(automation, now);
+      automation.consecutiveFailures = 0;
+      delete automation.backoffUntil;
       delete automation.lastError;
       await save(automation);
       return load(automationId);
