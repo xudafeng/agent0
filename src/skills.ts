@@ -65,7 +65,10 @@ function parseSkill(text: string): { name: string; description: string; body: st
   return { name: metadata.name, description: metadata.description.trim(), body };
 }
 
-export async function createSkillRuntime(directories = skillDirectories()) {
+export async function createSkillRuntime(
+  directories = skillDirectories(),
+  standaloneDirectories: string[] = [],
+) {
   const catalog = new Map<string, SkillSummary>();
   const active = new Map<string, string>();
   const diagnostics: string[] = [];
@@ -87,6 +90,17 @@ export async function createSkillRuntime(directories = skillDirectories()) {
       } catch (error) {
         diagnostics.push(`${path}: ${error instanceof Error ? error.message : String(error)}`);
       }
+    }
+  }
+
+  for (const directory of standaloneDirectories) {
+    try {
+      const root = await realpath(directory);
+      const path = join(root, 'SKILL.md');
+      const skill = parseSkill(await readFileWithin(root, path));
+      catalog.set(skill.name, { name: skill.name, description: skill.description, path: resolve(path) });
+    } catch (error) {
+      diagnostics.push(`${directory}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

@@ -8,12 +8,12 @@ export interface TraceRecorder {
   record(event: AgentEvent): Promise<void>;
 }
 
-export async function createTraceRecorder(): Promise<TraceRecorder> {
-  await mkdir(dirname(TRACE_PATH), { recursive: true });
+export async function createTraceRecorder(path = TRACE_PATH): Promise<TraceRecorder> {
+  await mkdir(dirname(path), { recursive: true });
 
   return {
     async record(event) {
-      await appendFile(TRACE_PATH, `${JSON.stringify(event)}\n`, 'utf-8');
+      await appendFile(path, `${JSON.stringify(event)}\n`, 'utf-8');
     },
   };
 }

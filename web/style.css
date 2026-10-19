@@ -1686,3 +1686,15 @@ dialog select {
   font-size: 11px;
   line-height: 1.7;
 }
+
+
+.background-subheading {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid #e6eaee;
+  color: #929aa3;
+  font-size: 8px;
+  font-weight: 650;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
