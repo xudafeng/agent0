@@ -12,6 +12,7 @@ const scheduleSchema = z.object({
   repeatEveryMs: z.number().finite().positive().optional(),
   cronExpression: z.string().trim().min(1).max(500).optional(),
   timeZone: z.string().trim().min(1).max(200).optional(),
+  maxRunMs: z.number().finite().positive().max(7 * 24 * 60 * 60 * 1000).optional(),
 }).strict();
 
 const idSchema = z.object({
@@ -36,6 +37,7 @@ export function createAgentAutomationTools(store: AgentAutomationStore): AgentTo
             repeatEveryMs: { type: 'number', description: 'Positive interval in milliseconds.' },
             cronExpression: { type: 'string', description: 'Cron expression for recurring execution.' },
             timeZone: { type: 'string', description: 'IANA timezone required with cronExpression.' },
+            maxRunMs: { type: 'number', description: 'Maximum duration for one AgentRun in milliseconds. Defaults to 6 hours.' },
           },
           required: ['prompt', 'cwd'],
           additionalProperties: false,
@@ -55,6 +57,7 @@ export function createAgentAutomationTools(store: AgentAutomationStore): AgentTo
           ...(parsed.repeatEveryMs === undefined ? {} : { repeatEveryMs: parsed.repeatEveryMs }),
           ...(parsed.cronExpression === undefined ? {} : { cronExpression: parsed.cronExpression }),
           ...(parsed.timeZone === undefined ? {} : { timeZone: parsed.timeZone }),
+          ...(parsed.maxRunMs === undefined ? {} : { maxRunMs: parsed.maxRunMs }),
         });
       },
     },
