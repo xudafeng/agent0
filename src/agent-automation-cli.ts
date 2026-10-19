@@ -21,6 +21,7 @@ function usage(): string {
     '  --every DURATION         Examples: 30m, 12h, 1d',
     '  --cron EXPR',
     '  --timezone ZONE          IANA timezone required with --cron',
+    '  --timeout DURATION        Max run duration, e.g. 2h or 6h (default: 6h)',
     '  --profile-dir DIR',
   ].join('\n');
 }
@@ -93,6 +94,7 @@ async function main(): Promise<void> {
     const every = options.get('every')?.at(-1);
     const cronExpression = options.get('cron')?.at(-1);
     const timeZone = options.get('timezone')?.at(-1);
+    const timeout = options.get('timeout')?.at(-1);
     if (Boolean(every) === Boolean(cronExpression || timeZone)) {
       throw new Error('Use exactly one recurrence: --every or --cron with --timezone.');
     }
@@ -109,6 +111,7 @@ async function main(): Promise<void> {
       ...(every ? { repeatEveryMs: parseDuration(every) } : {}),
       ...(cronExpression ? { cronExpression } : {}),
       ...(timeZone ? { timeZone } : {}),
+      ...(timeout ? { maxRunMs: parseDuration(timeout) } : {}),
     });
     console.log(JSON.stringify(automation, null, 2));
     return;
