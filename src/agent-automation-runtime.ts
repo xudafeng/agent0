@@ -82,7 +82,18 @@ export async function runAgentAutomationWake(
   const results: AgentAutomationWakeItem[] = [];
 
   for (const scheduled of dueAutomations) {
-    const release = await store.claim(scheduled.automationId);
+    let release: (() => Promise<void>) | undefined;
+    try {
+      release = await store.claim(scheduled.automationId);
+    } catch (error) {
+      results.push({
+        automationId: scheduled.automationId,
+        status: 'failed',
+        error: error instanceof Error ? error.message : String(error),
+        nextRunAt: scheduled.nextRunAt,
+      });
+      continue;
+    }
     if (!release) {
       results.push({
         automationId: scheduled.automationId,
@@ -114,7 +125,7 @@ export async function runAgentAutomationWake(
               automationId: automation.automationId,
               status: 'skipped',
               agentRunId: running.agentRunId,
-              reason: 'previous AgentRun ownership is unknown',
+              reason: 'previous AgentRun is still running (ownership unknown)',
               nextRunAt: automation.nextRunAt,
             });
             continue;
@@ -234,6 +245,13 @@ export async function runAgentAutomationWake(
       } finally {
         clearTimeout(timeout);
       }
+    } catch (error) {
+      results.push({
+        automationId: scheduled.automationId,
+        status: 'failed',
+        error: error instanceof Error ? error.message : String(error),
+        nextRunAt: scheduled.nextRunAt,
+      });
     } finally {
       await release();
     }
