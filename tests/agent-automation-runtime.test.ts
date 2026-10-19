@@ -112,7 +112,10 @@ test('failed scheduled AgentRun records the error and waits for the next interva
   const updated = await store.get(automation.automationId);
   assert.equal(updated.runCount, 1);
   assert.equal(updated.runningAgentRunId, undefined);
-  assert.equal(updated.nextRunAt, '2026-10-10T03:00:00.000Z');
+  assert.equal(updated.consecutiveFailures, 1);
+  assert.ok(updated.backoffUntil);
+  assert.ok(new Date(updated.nextRunAt).getTime() >= new Date('2026-10-10T03:00:00.000Z').getTime());
+  assert.ok(new Date(updated.nextRunAt).getTime() >= new Date(updated.backoffUntil!).getTime());
   assert.match(updated.lastError ?? '', /network unavailable/);
 });
 
