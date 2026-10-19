@@ -6,7 +6,7 @@ import {
   type AgentAutomation,
   type AgentAutomationStore,
 } from './agent-automation.js';
-import { createFileAgentRunStore } from './agent-run-store.js';
+import { createFileAgentRunStore, type AgentRunStore } from './agent-run-store.js';
 import {
   runHeadlessAgent,
   type HeadlessAgentRunOptions,
@@ -63,6 +63,191 @@ function nextWakeAt(automations: AgentAutomation[]): string | undefined {
     .sort()[0];
 }
 
+async function executeAutomation(
+  profile: string,
+  scheduled: AgentAutomation,
+  observedAt: Date,
+  mode: 'scheduled' | 'manual',
+  store: AgentAutomationStore,
+  agentRuns: AgentRunStore,
+  execute: (options: HeadlessAgentRunOptions) => Promise<HeadlessAgentRunResult>,
+): Promise<AgentAutomationWakeItem> {
+  let release: (() => Promise<void>) | undefined;
+  try {
+    release = await store.claim(scheduled.automationId);
+  } catch (error) {
+    return {
+      automationId: scheduled.automationId,
+      status: 'failed',
+      error: error instanceof Error ? error.message : String(error),
+      nextRunAt: scheduled.nextRunAt,
+    };
+  }
+
+  if (!release) {
+    return {
+      automationId: scheduled.automationId,
+      status: 'skipped',
+      reason: 'automation is already claimed by another worker',
+      nextRunAt: scheduled.nextRunAt,
+    };
+  }
+
+  try {
+    let automation = await store.get(scheduled.automationId);
+    if (automation.state !== 'enabled') {
+      return {
+        automationId: automation.automationId,
+        status: 'skipped',
+        reason: 'automation is disabled',
+        nextRunAt: automation.nextRunAt,
+      };
+    }
+
+    let resumeAgentRunId: string | undefined;
+    if (automation.runningAgentRunId) {
+      const running = await agentRuns.load(automation.runningAgentRunId);
+      if (running?.status === 'running') {
+        if (running.ownerPid === undefined) {
+          return {
+            automationId: automation.automationId,
+            status: 'skipped',
+            agentRunId: running.agentRunId,
+            reason: 'previous AgentRun is still running (ownership unknown)',
+            nextRunAt: automation.nextRunAt,
+          };
+        }
+        if (isProcessAlive(running.ownerPid)) {
+          return {
+            automationId: automation.automationId,
+            status: 'skipped',
+            agentRunId: running.agentRunId,
+            reason: 'previous AgentRun is still running',
+            nextRunAt: automation.nextRunAt,
+          };
+        }
+        if (running.runtimeRunId) {
+          resumeAgentRunId = running.agentRunId;
+        } else {
+          const failedAt = new Date().toISOString();
+          running.status = 'failed';
+          running.error = 'Owner process exited before a resumable runtime checkpoint was recorded.';
+          running.completedAt = failedAt;
+          running.updatedAt = failedAt;
+          running.heartbeatAt = failedAt;
+          delete running.ownerPid;
+          await agentRuns.save(running);
+          delete automation.runningAgentRunId;
+          automation.lastError = running.error;
+          await store.save(automation);
+        }
+      } else {
+        delete automation.runningAgentRunId;
+        await store.save(automation);
+      }
+    }
+
+    if (!resumeAgentRunId && mode === 'scheduled' && !due(automation, observedAt)) {
+      return {
+        automationId: automation.automationId,
+        status: 'skipped',
+        reason: 'stale run reconciled; automation is not currently due',
+        nextRunAt: automation.nextRunAt,
+      };
+    }
+
+    if (!resumeAgentRunId && mode === 'scheduled') {
+      automation.nextRunAt = nextAgentAutomationRunAt(automation, observedAt);
+      delete automation.lastError;
+      await store.save(automation);
+    }
+
+    const timeoutMs = automation.maxRunMs ?? 6 * 60 * 60 * 1000;
+    const timeoutController = new AbortController();
+    const timeout = setTimeout(() => {
+      timeoutController.abort(new AgentAutomationTimeoutError(automation.automationId, timeoutMs));
+    }, timeoutMs);
+
+    try {
+      const result = await execute({
+        profileDir: profile,
+        ...(resumeAgentRunId === undefined ? { prompt: automation.prompt } : {}),
+        ...(resumeAgentRunId === undefined ? { cwd: automation.cwd } : {}),
+        ...(resumeAgentRunId === undefined && automation.skillName !== undefined
+          ? { skillName: automation.skillName }
+          : {}),
+        ...(resumeAgentRunId === undefined ? { skillRoots: [...automation.skillRoots] } : {}),
+        ...(resumeAgentRunId === undefined
+          ? { policy: automation.policy, trigger: mode === 'scheduled' ? 'scheduled' as const : 'manual' as const }
+          : {}),
+        ...(resumeAgentRunId === undefined ? {} : { resumeAgentRunId }),
+        signal: timeoutController.signal,
+        ...(resumeAgentRunId === undefined ? {
+          onAgentRunCreated: async (record) => {
+            const latest = await store.get(automation.automationId);
+            latest.runningAgentRunId = record.agentRunId;
+            latest.lastAgentRunId = record.agentRunId;
+            latest.lastStartedAt = new Date().toISOString();
+            latest.runCount += 1;
+            delete latest.lastError;
+            await store.save(latest);
+          },
+        } : {}),
+      });
+
+      automation = await store.get(automation.automationId);
+      delete automation.runningAgentRunId;
+      automation.lastAgentRunId = result.record.agentRunId;
+      automation.lastCompletedAt = new Date().toISOString();
+      automation.consecutiveFailures = 0;
+      delete automation.backoffUntil;
+      delete automation.lastError;
+      await store.save(automation);
+      return {
+        automationId: automation.automationId,
+        status: 'completed',
+        agentRunId: result.record.agentRunId,
+        nextRunAt: automation.nextRunAt,
+      };
+    } catch (error) {
+      automation = await store.get(automation.automationId);
+      delete automation.runningAgentRunId;
+      const failedAt = new Date();
+      automation.lastCompletedAt = failedAt.toISOString();
+      automation.lastError = error instanceof Error ? error.message : String(error);
+
+      if (mode === 'scheduled') {
+        automation.consecutiveFailures = (automation.consecutiveFailures ?? 0) + 1;
+        const backoffUntil = new Date(
+          failedAt.getTime() + failureBackoffMs(automation.consecutiveFailures),
+        ).toISOString();
+        automation.backoffUntil = backoffUntil;
+        if (backoffUntil > automation.nextRunAt) automation.nextRunAt = backoffUntil;
+      }
+
+      await store.save(automation);
+      return {
+        automationId: automation.automationId,
+        status: 'failed',
+        ...(automation.lastAgentRunId === undefined ? {} : { agentRunId: automation.lastAgentRunId }),
+        error: automation.lastError,
+        nextRunAt: automation.nextRunAt,
+      };
+    } finally {
+      clearTimeout(timeout);
+    }
+  } catch (error) {
+    return {
+      automationId: scheduled.automationId,
+      status: 'failed',
+      error: error instanceof Error ? error.message : String(error),
+      nextRunAt: scheduled.nextRunAt,
+    };
+  } finally {
+    await release();
+  }
+}
+
 export async function runAgentAutomationWake(
   profileDir: string,
   now: Date | string | number = new Date(),
@@ -79,182 +264,18 @@ export async function runAgentAutomationWake(
   const dueAutomations = current
     .filter((automation) => due(automation, wakeDate) || automation.runningAgentRunId !== undefined)
     .sort((a, b) => a.nextRunAt.localeCompare(b.nextRunAt));
+
   const results: AgentAutomationWakeItem[] = [];
-
-  for (const scheduled of dueAutomations) {
-    let release: (() => Promise<void>) | undefined;
-    try {
-      release = await store.claim(scheduled.automationId);
-    } catch (error) {
-      results.push({
-        automationId: scheduled.automationId,
-        status: 'failed',
-        error: error instanceof Error ? error.message : String(error),
-        nextRunAt: scheduled.nextRunAt,
-      });
-      continue;
-    }
-    if (!release) {
-      results.push({
-        automationId: scheduled.automationId,
-        status: 'skipped',
-        reason: 'automation is already claimed by another worker',
-        nextRunAt: scheduled.nextRunAt,
-      });
-      continue;
-    }
-
-    try {
-      let automation = await store.get(scheduled.automationId);
-      if (automation.state !== 'enabled') {
-        results.push({
-          automationId: automation.automationId,
-          status: 'skipped',
-          reason: 'automation is disabled',
-          nextRunAt: automation.nextRunAt,
-        });
-        continue;
-      }
-
-      let resumeAgentRunId: string | undefined;
-      if (automation.runningAgentRunId) {
-        const running = await agentRuns.load(automation.runningAgentRunId);
-        if (running?.status === 'running') {
-          if (running.ownerPid === undefined) {
-            results.push({
-              automationId: automation.automationId,
-              status: 'skipped',
-              agentRunId: running.agentRunId,
-              reason: 'previous AgentRun is still running (ownership unknown)',
-              nextRunAt: automation.nextRunAt,
-            });
-            continue;
-          }
-          if (isProcessAlive(running.ownerPid)) {
-            results.push({
-              automationId: automation.automationId,
-              status: 'skipped',
-              agentRunId: running.agentRunId,
-              reason: 'previous AgentRun is still running',
-              nextRunAt: automation.nextRunAt,
-            });
-            continue;
-          }
-          if (running.runtimeRunId) {
-            resumeAgentRunId = running.agentRunId;
-          } else {
-            const failedAt = new Date().toISOString();
-            running.status = 'failed';
-            running.error = 'Owner process exited before a resumable runtime checkpoint was recorded.';
-            running.completedAt = failedAt;
-            running.updatedAt = failedAt;
-            running.heartbeatAt = failedAt;
-            delete running.ownerPid;
-            await agentRuns.save(running);
-            delete automation.runningAgentRunId;
-            automation.lastError = running.error;
-            await store.save(automation);
-          }
-        } else {
-          delete automation.runningAgentRunId;
-          await store.save(automation);
-        }
-      }
-
-      if (!resumeAgentRunId && !due(automation, wakeDate)) {
-        results.push({
-          automationId: automation.automationId,
-          status: 'skipped',
-          reason: 'stale run reconciled; automation is not currently due',
-          nextRunAt: automation.nextRunAt,
-        });
-        continue;
-      }
-
-      if (!resumeAgentRunId) {
-        // Advance before a new execution so a missed interval is caught up once
-        // rather than replayed repeatedly after a long sleep or normal failure.
-        automation.nextRunAt = nextAgentAutomationRunAt(automation, wakeDate);
-        delete automation.lastError;
-        await store.save(automation);
-      }
-
-      const timeoutMs = automation.maxRunMs ?? 6 * 60 * 60 * 1000;
-      const timeoutController = new AbortController();
-      const timeout = setTimeout(() => {
-        timeoutController.abort(new AgentAutomationTimeoutError(automation.automationId, timeoutMs));
-      }, timeoutMs);
-
-      try {
-        const result = await execute({
-          profileDir: profile,
-          ...(resumeAgentRunId === undefined ? { prompt: automation.prompt } : {}),
-          ...(resumeAgentRunId === undefined ? { cwd: automation.cwd } : {}),
-          ...(resumeAgentRunId === undefined && automation.skillName !== undefined ? { skillName: automation.skillName } : {}),
-          ...(resumeAgentRunId === undefined ? { skillRoots: [...automation.skillRoots] } : {}),
-          ...(resumeAgentRunId === undefined ? { policy: automation.policy, trigger: 'scheduled' as const } : {}),
-          ...(resumeAgentRunId === undefined ? {} : { resumeAgentRunId }),
-          signal: timeoutController.signal,
-          ...(resumeAgentRunId === undefined ? {
-            onAgentRunCreated: async (record) => {
-              const latest = await store.get(automation.automationId);
-              latest.runningAgentRunId = record.agentRunId;
-              latest.lastAgentRunId = record.agentRunId;
-              latest.lastStartedAt = new Date().toISOString();
-              latest.runCount += 1;
-              delete latest.lastError;
-              await store.save(latest);
-            },
-          } : {}),
-        });
-
-        automation = await store.get(automation.automationId);
-        delete automation.runningAgentRunId;
-        automation.lastAgentRunId = result.record.agentRunId;
-        automation.lastCompletedAt = new Date().toISOString();
-        automation.consecutiveFailures = 0;
-        delete automation.backoffUntil;
-        delete automation.lastError;
-        await store.save(automation);
-        results.push({
-          automationId: automation.automationId,
-          status: 'completed',
-          agentRunId: result.record.agentRunId,
-          nextRunAt: automation.nextRunAt,
-        });
-      } catch (error) {
-        automation = await store.get(automation.automationId);
-        delete automation.runningAgentRunId;
-        const failedAt = new Date();
-        automation.lastCompletedAt = failedAt.toISOString();
-        automation.lastError = error instanceof Error ? error.message : String(error);
-        automation.consecutiveFailures = (automation.consecutiveFailures ?? 0) + 1;
-        const backoffUntil = new Date(
-          failedAt.getTime() + failureBackoffMs(automation.consecutiveFailures),
-        ).toISOString();
-        automation.backoffUntil = backoffUntil;
-        if (backoffUntil > automation.nextRunAt) automation.nextRunAt = backoffUntil;
-        await store.save(automation);
-        results.push({
-          automationId: automation.automationId,
-          status: 'failed',
-          ...(automation.lastAgentRunId === undefined ? {} : { agentRunId: automation.lastAgentRunId }),
-          error: automation.lastError,
-          nextRunAt: automation.nextRunAt,
-        });
-      } finally {
-        clearTimeout(timeout);
-      }
-    } catch (error) {
-      results.push({
-        automationId: scheduled.automationId,
-        status: 'failed',
-        error: error instanceof Error ? error.message : String(error),
-        nextRunAt: scheduled.nextRunAt,
-      });
-    } finally {
-      await release();
-    }
+  for (const automation of dueAutomations) {
+    results.push(await executeAutomation(
+      profile,
+      automation,
+      wakeDate,
+      'scheduled',
+      store,
+      agentRuns,
+      execute,
+    ));
   }
 
   const latest = await store.list();
@@ -264,4 +285,30 @@ export async function runAgentAutomationWake(
     automations: results,
     ...(next === undefined ? {} : { nextWakeAt: next }),
   };
+}
+
+export async function runAgentAutomationNow(
+  profileDir: string,
+  automationId: string,
+  now: Date | string | number = new Date(),
+  options: AgentAutomationWakeOptions = {},
+): Promise<AgentAutomationWakeItem> {
+  const observedAt = new Date(now);
+  if (!Number.isFinite(observedAt.getTime())) throw new Error('Invalid automation run time.');
+  const profile = resolve(profileDir);
+  const store = options.store ??
+    createFileAgentAutomationStore(join(profile, 'data', 'agent-automations'));
+  const agentRuns = createFileAgentRunStore(join(profile, 'data', 'agent-runs'));
+  const execute = options.execute ?? runHeadlessAgent;
+  const automation = await store.get(automationId);
+
+  return executeAutomation(
+    profile,
+    automation,
+    observedAt,
+    'manual',
+    store,
+    agentRuns,
+    execute,
+  );
 }
