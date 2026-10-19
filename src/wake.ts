@@ -1,20 +1,16 @@
+import { join, resolve } from 'node:path';
 import dotenv from 'dotenv';
-import { runWakeCycle } from './background-runtime.js';
-import { configuredComputerBackend } from './session-computer.js';
-import { createFileSessionStore } from './session-store.js';
-import { createFileWorkspaceStore } from './workspace.js';
+import { runFullWakeCycle } from './full-wake.js';
 
-dotenv.config({ path: '.env', override: true });
+const profileDir = resolve(process.env.AGENT0_PROFILE_DIR || process.cwd());
+dotenv.config({ path: join(profileDir, '.env'), override: true, quiet: true });
 
-const sessions = createFileSessionStore();
-const workspaces = createFileWorkspaceStore();
-const backend = configuredComputerBackend(workspaces);
-
-if (!backend) {
-  console.error('No computer backend configured. Set AGENT0_COMPUTER.');
+const result = await runFullWakeCycle(profileDir);
+console.log(JSON.stringify(result, null, 2));
+if (
+  result.automations.automations.some((item) => item.status === 'failed') ||
+  result.background.sessions.some((session) => session.error) ||
+  result.backgroundError
+) {
   process.exitCode = 1;
-} else {
-  const result = await runWakeCycle(sessions, workspaces, backend);
-  console.log(JSON.stringify(result, null, 2));
-  if (result.sessions.some((session) => session.error)) process.exitCode = 1;
 }
