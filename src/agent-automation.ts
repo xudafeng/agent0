@@ -26,6 +26,9 @@ export interface AgentAutomation {
   lastStartedAt?: string;
   lastCompletedAt?: string;
   lastError?: string;
+  maxRunMs?: number;
+  consecutiveFailures?: number;
+  backoffUntil?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -40,6 +43,7 @@ export interface AgentAutomationCreateInput {
   repeatEveryMs?: number;
   cronExpression?: string;
   timeZone?: string;
+  maxRunMs?: number;
   now?: Date | string | number;
 }
 
@@ -56,6 +60,37 @@ export interface AgentAutomationStore {
 interface AutomationIndex {
   version: 1;
   automationIds: string[];
+}
+
+export const DEFAULT_AUTOMATION_MAX_RUN_MS = 6 * 60 * 60 * 1000;
+
+export function isProcessAlive(pid: number | undefined): boolean {
+  if (!Number.isInteger(pid) || !pid || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+interface AutomationClaim {
+  automationId: string;
+  pid: number;
+  claimedAt: string;
+}
+
+function validateClaim(value: unknown, automationId: string): AutomationClaim {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Invalid Agent automation claim lock.');
+  }
+  const claim = value as Partial<AutomationClaim>;
+  if (claim.automationId !== automationId || !Number.isInteger(claim.pid) ||
+      (claim.pid ?? 0) <= 0 || typeof claim.claimedAt !== 'string') {
+    throw new Error('Invalid Agent automation claim lock.');
+  }
+  parseTime(claim.claimedAt);
+  return claim as AutomationClaim;
 }
 
 function assertId(value: string): void {
@@ -127,6 +162,15 @@ function validateAutomation(value: unknown, expectedId?: string): AgentAutomatio
   if (item.skillName !== undefined && typeof item.skillName !== 'string') {
     throw new Error('Invalid agent automation skill.');
   }
+  if (item.maxRunMs !== undefined &&
+      (!Number.isFinite(item.maxRunMs) || item.maxRunMs <= 0 || item.maxRunMs > 7 * 24 * 60 * 60 * 1000)) {
+    throw new Error('Invalid agent automation max run duration.');
+  }
+  if (item.consecutiveFailures !== undefined &&
+      (!Number.isInteger(item.consecutiveFailures) || item.consecutiveFailures < 0)) {
+    throw new Error('Invalid agent automation failure count.');
+  }
+  if (item.backoffUntil !== undefined) parseTime(item.backoffUntil);
   if (item.repeatEveryMs !== undefined &&
       (!Number.isFinite(item.repeatEveryMs) || item.repeatEveryMs <= 0)) {
     throw new Error('Invalid agent automation interval.');
@@ -233,6 +277,8 @@ export function createFileAgentAutomationStore(root = 'data/agent-automations'):
         ...(input.skillName?.trim() ? { skillName: input.skillName.trim() } : {}),
         skillRoots: (input.skillRoots ?? []).map((root) => normalizedText(root, 'Skill root', 4000)),
         policy: input.policy ?? 'read-only',
+        maxRunMs: input.maxRunMs ?? DEFAULT_AUTOMATION_MAX_RUN_MS,
+        consecutiveFailures: 0,
         ...recurrence,
         nextRunAt: nextAgentAutomationRunAt(recurrence, now),
         runCount: 0,
@@ -277,25 +323,33 @@ export function createFileAgentAutomationStore(root = 'data/agent-automations'):
     async claim(automationId) {
       const path = lockPath(automationId);
       await mkdir(dirname(path), { recursive: true });
-      try {
-        const handle = await open(path, 'wx');
-        await handle.writeFile(`${JSON.stringify({
-          automationId,
-          pid: process.pid,
-          claimedAt: new Date().toISOString(),
-        })}\n`, 'utf8');
-        await handle.close();
 
-        let released = false;
-        return async () => {
-          if (released) return;
-          released = true;
+      const attempt = async (): Promise<(() => Promise<void>) | undefined> => {
+        try {
+          const handle = await open(path, 'wx');
+          await handle.writeFile(`${JSON.stringify({
+            automationId,
+            pid: process.pid,
+            claimedAt: new Date().toISOString(),
+          })}\n`, 'utf8');
+          await handle.close();
+
+          let released = false;
+          return async () => {
+            if (released) return;
+            released = true;
+            await rm(path, { force: true });
+          };
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+          const claim = validateClaim(JSON.parse(await readFile(path, 'utf8')) as unknown, automationId);
+          if (isProcessAlive(claim.pid)) return undefined;
           await rm(path, { force: true });
-        };
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'EEXIST') return undefined;
-        throw error;
-      }
+          return attempt();
+        }
+      };
+
+      return attempt();
     },
   };
 }
