@@ -496,3 +496,78 @@ It does **not** allow a headless Agent to create, cancel, or enable Agent automa
 
 MCP tools remain disabled in non-interactive headless runs.
 
+## Automation hardening
+
+Long-running Agent automations include additional production safeguards.
+
+### Stale lock recovery
+
+Per-automation claim files record the owning process ID.
+
+If a worker exits unexpectedly and leaves a lock behind, the next worker checks whether the owner process still exists:
+
+- live PID → keep the claim and skip duplicate execution
+- dead PID → remove the stale lock and reclaim the automation
+- malformed lock → fail that automation wake without deleting unknown state
+
+A failure in one automation claim does not stop other automations from being evaluated.
+
+### Stale AgentRun recovery
+
+Headless AgentRun records track the owner PID and a heartbeat timestamp.
+
+When a worker restarts and finds a `runningAgentRunId`:
+
+- live owner process → skip; the run is still active
+- unknown legacy ownership → skip conservatively
+- dead owner + runtime checkpoint → resume the same AgentRun
+- dead owner without runtime checkpoint → mark that run failed; do not pretend it completed
+
+Resuming the existing checkpoint is preferred over starting a new AgentRun so non-idempotent radar delivery steps are not replayed blindly.
+
+### Run timeout
+
+Scheduled AgentRuns default to a six-hour maximum duration.
+
+Override it when creating an automation:
+
+```bash
+pnpm agent-automation -- create \
+  --name radar \
+  --cwd /path/to/xdf-radar-skills \
+  --skill radar \
+  --every 12h \
+  --timeout 4h \
+  --policy trusted-workspace \
+  --prompt "用 radar 做一版今天的 AI 行业趋势扫描"
+```
+
+The Agent tool also accepts `maxRunMs`.
+
+Timeout cancellation flows through the normal AbortSignal path, so the Headless AgentRun is persisted as cancelled/failed rather than remaining stuck in `running`.
+
+### Failure backoff
+
+Automations track consecutive failures.
+
+After a failure, Agent0 applies exponential cooldown:
+
+```
+5m → 10m → 20m → 40m → ... → max 6h
+```
+
+The cooldown never shortens the normal recurrence. A 12-hour radar automation therefore still waits for its normal next interval unless that interval would otherwise arrive sooner than the cooldown.
+
+A successful run resets the failure streak. Explicitly re-enabling an automation also clears its failure streak and backoff.
+
+### Setup failures
+
+Failures before model execution—such as:
+
+- missing working directory
+- invalid skill root
+- missing provider credentials
+- runtime initialization errors
+
+are now part of the durable Headless AgentRun lifecycle. Once an AgentRun record exists, setup failures are persisted as failed/cancelled instead of leaving a false `running` record.
+
