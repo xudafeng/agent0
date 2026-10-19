@@ -95,11 +95,11 @@ export async function runAgentAutomationWake(
 
     try {
       let automation = await store.get(scheduled.automationId);
-      if (!due(automation, wakeDate)) {
+      if (automation.state !== 'enabled') {
         results.push({
           automationId: automation.automationId,
           status: 'skipped',
-          reason: automation.state !== 'enabled' ? 'automation is disabled' : 'automation is no longer due',
+          reason: 'automation is disabled',
           nextRunAt: automation.nextRunAt,
         });
         continue;
