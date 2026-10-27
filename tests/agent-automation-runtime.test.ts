@@ -4,7 +4,7 @@ import { mkdtemp } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createFileAgentAutomationStore } from '../src/agent-automation.js';
-import { runAgentAutomationWake } from '../src/agent-automation-runtime.js';
+import { runAgentAutomationNow, runAgentAutomationWake } from '../src/agent-automation-runtime.js';
 import { createFileAgentRunStore, type AgentRunRecord } from '../src/agent-run-store.js';
 import type { HeadlessAgentRunOptions, HeadlessAgentRunResult } from '../src/agent-run.js';
 
@@ -331,4 +331,83 @@ test('automation timeout aborts the run and applies failure backoff', async () =
   assert.equal(updated.consecutiveFailures, 1);
   assert.ok(updated.backoffUntil);
   assert.ok(new Date(updated.nextRunAt).getTime() >= new Date(updated.backoffUntil!).getTime());
+});
+
+
+test('manual run-now preserves the production schedule', async () => {
+  const profile = await mkdtemp(join(tmpdir(), 'agent0-profile-'));
+  const store = createFileAgentAutomationStore(join(profile, 'data', 'agent-automations'));
+  const automation = await store.create({
+    prompt: 'Run radar.',
+    cwd: '/tmp/radar',
+    skillName: 'radar',
+    skillRoots: ['/tmp/radar'],
+    policy: 'trusted-workspace',
+    repeatEveryMs: 12 * 60 * 60 * 1000,
+    now: new Date('2026-10-10T00:00:00.000Z'),
+  });
+
+  let trigger: string | undefined;
+  const result = await runAgentAutomationNow(
+    profile,
+    automation.automationId,
+    new Date('2026-10-10T01:00:00.000Z'),
+    {
+      store,
+      execute: async (options) => {
+        trigger = options.trigger;
+        const running = runningRecord('agent-run-manual', options, '2026-10-10T01:00:00.000Z');
+        await options.onAgentRunCreated?.(running);
+        return {
+          record: {
+            ...running,
+            status: 'completed',
+            result: 'done',
+            completedAt: '2026-10-10T01:01:00.000Z',
+            updatedAt: '2026-10-10T01:01:00.000Z',
+          },
+          text: 'done',
+          steps: 2,
+        };
+      },
+    },
+  );
+
+  assert.equal(result.status, 'completed');
+  assert.equal(trigger, 'manual');
+
+  const updated = await store.get(automation.automationId);
+  assert.equal(updated.nextRunAt, '2026-10-10T12:00:00.000Z');
+  assert.equal(updated.runCount, 1);
+});
+
+test('manual run-now failure does not apply production backoff', async () => {
+  const profile = await mkdtemp(join(tmpdir(), 'agent0-profile-'));
+  const store = createFileAgentAutomationStore(join(profile, 'data', 'agent-automations'));
+  const automation = await store.create({
+    prompt: 'Run radar.',
+    cwd: '/tmp/radar',
+    repeatEveryMs: 12 * 60 * 60 * 1000,
+    now: new Date('2026-10-10T00:00:00.000Z'),
+  });
+
+  const result = await runAgentAutomationNow(
+    profile,
+    automation.automationId,
+    new Date('2026-10-10T01:00:00.000Z'),
+    {
+      store,
+      execute: async (options) => {
+        await options.onAgentRunCreated?.(runningRecord('agent-run-manual-fail', options));
+        throw new Error('manual validation failed');
+      },
+    },
+  );
+
+  assert.equal(result.status, 'failed');
+  const updated = await store.get(automation.automationId);
+  assert.equal(updated.nextRunAt, '2026-10-10T12:00:00.000Z');
+  assert.equal(updated.consecutiveFailures, 0);
+  assert.equal(updated.backoffUntil, undefined);
+  assert.match(updated.lastError ?? '', /manual validation failed/);
 });
