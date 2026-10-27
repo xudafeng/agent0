@@ -1,6 +1,8 @@
 import { join, resolve } from 'node:path';
 import dotenv from 'dotenv';
 import { createFileAgentAutomationStore } from './agent-automation.js';
+import { preflightAgentAutomation } from './agent-automation-preflight.js';
+import { runAgentAutomationNow } from './agent-automation-runtime.js';
 
 function usage(): string {
   return [
@@ -8,6 +10,8 @@ function usage(): string {
     '  pnpm agent-automation -- create --cwd DIR --prompt TEXT (--every 12h | --cron EXPR --timezone ZONE)',
     '  pnpm agent-automation -- list',
     '  pnpm agent-automation -- status ID',
+    '  pnpm agent-automation -- preflight ID',
+    '  pnpm agent-automation -- run ID',
     '  pnpm agent-automation -- cancel ID',
     '  pnpm agent-automation -- enable ID',
     '',
@@ -136,6 +140,24 @@ async function main(): Promise<void> {
   if (!id) throw new Error(`${command} requires an automation ID.`);
   if (command === 'status') {
     console.log(JSON.stringify(await store.get(id), null, 2));
+    return;
+  }
+  if (command === 'preflight') {
+    const result = await preflightAgentAutomation(await store.get(id));
+    console.log(JSON.stringify(result, null, 2));
+    if (!result.ok) process.exitCode = 1;
+    return;
+  }
+  if (command === 'run') {
+    const preflight = await preflightAgentAutomation(await store.get(id));
+    if (!preflight.ok) {
+      console.log(JSON.stringify({ preflight }, null, 2));
+      process.exitCode = 1;
+      return;
+    }
+    const result = await runAgentAutomationNow(profileDir, id);
+    console.log(JSON.stringify({ preflight, result }, null, 2));
+    if (result.status !== 'completed') process.exitCode = 1;
     return;
   }
   if (command === 'cancel') {

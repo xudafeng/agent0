@@ -571,3 +571,72 @@ Failures before model execution—such as:
 
 are now part of the durable Headless AgentRun lifecycle. Once an AgentRun record exists, setup failures are persisted as failed/cancelled instead of leaving a false `running` record.
 
+## Validate an automation before waiting for its schedule
+
+Before putting a new automation under the long-lived worker, validate the exact stored configuration.
+
+First create the automation:
+
+```bash
+pnpm agent-automation -- create \
+  --name radar \
+  --cwd /path/to/xdf-radar-skills \
+  --skill radar \
+  --every 12h \
+  --timeout 4h \
+  --policy trusted-workspace \
+  --prompt "用 radar 做一版今天的 AI 行业趋势扫描"
+```
+
+Then run preflight with the returned automation ID:
+
+```bash
+pnpm agent-automation -- preflight <automationId>
+```
+
+Preflight checks:
+
+- the configured working directory exists and is a directory
+- standalone skill roots can be parsed
+- the requested skill is available
+- the configured LLM provider has its required model/API key settings
+- whether Exa web tools are configured
+- whether git is available in the working directory environment
+- whether the automation itself is enabled
+
+A missing Exa key is a warning rather than a generic hard failure because not every Agent automation requires web research.
+
+### Run the stored automation immediately
+
+After preflight passes:
+
+```bash
+pnpm agent-automation -- run <automationId>
+```
+
+This runs the same stored cwd, skill, policy, timeout, claim locking, durable AgentRun, and recovery path used by scheduled execution.
+
+A manual run intentionally **does not move `nextRunAt`**. It also does not apply production failure backoff when the manual validation fails. This keeps immediate validation independent from the production recurrence clock.
+
+Once the immediate run succeeds, start the worker:
+
+```bash
+pnpm agent-worker
+```
+
+For a new radar installation, the recommended order is therefore:
+
+```
+create
+  ↓
+preflight
+  ↓
+run now
+  ↓
+inspect report / git / email
+  ↓
+agent-worker
+  ↓
+12-hour recurring operation
+```
+
